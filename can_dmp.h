@@ -150,7 +150,7 @@ static inline bool isDmpFrameRcv(CAN_DMP *frame) {
 }
 
 extern void dmpInit();
-extern bool dmpAutoPreRegester(unsigned int devTypeIndex,unsigned int *id,DMP_DEV *newadddev);
+extern bool dmpAutoPreRegester(unsigned int devTypeIndex,unsigned int *id,DMP_DEV **newadddev);
 extern void praseDevList(CAN_DMP *frame, struct list_head *devlist);
 extern void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist);
 extern void dmpSysStore();

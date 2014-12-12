@@ -242,7 +242,7 @@ __packed typedef struct{
 
 
 
-struct __CO_RUN ;
+typedef struct __CO_RUN CO_RUN;
 
 typedef struct {
     uint32 diameter;
@@ -265,7 +265,7 @@ typedef struct {
     uint32 file_econoOff;
     uint32 numofeconomizer;
     ECONOMIZER_PARAM econo[200];
-    struct __CO_RUN *run;
+    CO_RUN *run
     //sink sinkermotor
 }CO;
 
@@ -284,8 +284,8 @@ typedef struct{
 
 #define ECONO_BEGIN   2
 #define ECONO_END     4
-#define IS_ECONO_BEGIN(A)   ((A).econoFlag & ECONO_BEGIN)   
-#define IS_ECONO_END(A)   ((A).econoFlag & ECONO_END) 
+#define IS_ECONO_BEGIN(A)   ((A).econoFlag & ECONO_BEGIN)
+#define IS_ECONO_END(A)   ((A).econoFlag & ECONO_END)
 
 
 

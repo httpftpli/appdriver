@@ -13,6 +13,7 @@
 #include "mmcsd_proto.h"
 #include "delay.h"
 #include "atomic.h"
+#include "algorithm.h"
 
 
 #define DMPDEV_INAND_SECTOR  USER_SECTOR+10
@@ -435,13 +436,13 @@ static DMP_DEV* dmpsys_find_offline(unsigned int devType) {
 }
 
 
-bool dmpAutoPreRegester(unsigned int devTypeIndex, unsigned int *id, DMP_DEV *newadddev) {
+bool dmpAutoPreRegester(unsigned int devTypeIndex, unsigned int *id, DMP_DEV **newadddev) {
     unsigned int devType = dmpindex2devtype(devTypeIndex);
     if (!dmpWillRegAuto(devTypeIndex)) return false;
     DMP_DEV * devr,*devn;
     devr = dmpsys_find_offline(devType);
     devn = list_first_entry(&dmpSys.dev[devTypeIndex].newadd, DMP_DEV, list);
-    newadddev = devn;
+    *newadddev = devn;
     bool r = dmpCanPreSetId(devn->uid, true, 10);
     if (r == false) {
         return r;
@@ -450,6 +451,17 @@ bool dmpAutoPreRegester(unsigned int devTypeIndex, unsigned int *id, DMP_DEV *ne
     return true;
 }
 
+
+static int candmpsort(const struct list_head *a, const struct list_head *b){
+    DMP_DEV *deva = list_entry(a,DMP_DEV,list);
+    DMP_DEV *devb = list_entry(b,DMP_DEV,list);
+    if (deva->workid > devb->workid) {
+        return 1;
+    }else if (deva->workid == devb->workid){
+        return 0;
+    }
+    return -1;
+}
 
 bool dmpAutoRegester(unsigned int devTypeIndex) {
     unsigned int devType = dmpindex2devtype(devTypeIndex);
@@ -464,7 +476,7 @@ bool dmpAutoRegester(unsigned int devTypeIndex) {
         return r;
     }
     devn->stat |= DMP_DEV_DEV_ONLINEMASK;
-    list_move_tail(&devn->list, &dmpSys.dev[devTypeIndex].regester);
+    list_sort_insert(&devn->list, &dmpSys.dev[devTypeIndex].regester,candmpsort);
     dmpDevDataClear(devr);
     list_move(&devr->list, &devlistheadfree);
     return true;
@@ -481,16 +493,18 @@ DMP_DEV* dmpPreRegester1(unsigned int devTypeIndex, bool val) {
 
 
 bool dmpPreRegester2(DMP_DEV *dev, bool val) {
-    if (!dmpCanPreSetId(dev->uid, val, 20)) return false;		//10 
+    if (!dmpCanPreSetId(dev->uid, val, 20)) return false;		//10
     return true;
 }
 
 
+
+
 bool dmpRegester(DMP_DEV *dev, unsigned int id) {
     unsigned int uid = dev->uid;
-    if (!dmpCanSetId(uid, id, 50)) return false;				//原来为30  出现未等到回码现象后修改为50 
+    if (!dmpCanSetId(uid, id, 50)) return false;				//原来为30  出现未等到回码现象后修改为50
     dev->workid = id;
-    list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->regester);
+    list_sort_insert(&dev->list, &devtype2devgroup(dev->hdtype)->regester,candmpsort);
     dev->stat |= DMP_DEV_DEV_ONLINE;
     return true;
 }
