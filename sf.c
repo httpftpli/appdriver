@@ -8,7 +8,6 @@
 
 
 //sifu
-#define CAN_WP_FUNCODE_SF_HEARDBEAT             0x13
 #define CAN_WP_FUNCODE_SF_ALARM                 0x14
 #define CAN_WP_FUNCODE_SF_READPARAM             0x10
 #define CAN_WP_FUNCODE_SF_SETPARAM              0x11
@@ -35,19 +34,6 @@ static unsigned char paramipacknext = 0;
 static unsigned char monitoripacknext = 0;
 
 
-bool sfHeartBeat(unsigned char id, unsigned int timeout) {
-    DEFINE_CAN_WP_FRAME(frame);
-    frame.funcode = CAN_WP_FUNCODE_SF_HEARDBEAT;
-    frame.desid = SIFU_ID(id);
-    frame.dlc = 0;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
-    withintimedo(tmark, timeout) {
-        if (atomicTestClear(&g_flagSfHeartBeat)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 bool sfReadParam(unsigned char id, unsigned short *param, unsigned int len, unsigned int timeout) {
     paramipacknext = 0;
@@ -67,7 +53,7 @@ bool sfReadParam(unsigned char id, unsigned short *param, unsigned int len, unsi
 
 
 bool sfSetParam(unsigned char id, unsigned short *param, unsigned int len, unsigned int timeout) {
-    monitoripacknext = 0;    
+    monitoripacknext = 0;
     DEFINE_CAN_WP_FRAME(frame);
     unsigned int packnum = DIVUP(len, 3);
     frame.funcode = CAN_WP_FUNCODE_SF_SETPARAM;
@@ -187,9 +173,6 @@ void canSfRcv(CAN_WP *frame) {
     }
     unsigned int funcode = frame->funcode;
     switch (funcode) {
-    case CAN_WP_FUNCODE_SF_HEARDBEAT:
-        atomicSet(g_flagSfHeartBeat);
-        break;
     case CAN_WP_FUNCODE_SF_ALARM:
         g_sfAlarmCode = (unsigned char)frame->data[0];
         atomicSet(g_flagSfAlarm);

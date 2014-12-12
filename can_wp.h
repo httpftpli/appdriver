@@ -2,6 +2,9 @@
 #ifndef __CAN__WP__H__
 #define __CAN__WP__H__
 
+#include <stdbool.h>
+#include "atomic.h"
+
 
 #define CAN_WP_DEV_TYPE_MAIN    0x10
 #define CAN_WP_DEV_TYPE_MOTOR   0x20
@@ -9,6 +12,8 @@
 #define CAN_WP_DEV_TYPE_QIFA    0x40
 #define CAN_WP_DEV_TYPE_SIFU    0x50
 
+
+#define CAN_WP_FUNCODE_HEARDBEAT           0xfe
 
 
 //motor
@@ -60,10 +65,7 @@ typedef struct {
               {.flag = 1,.candir =0,.xtd=1,.srcid=0x11}
 
 
-/*static inline unsigned int wpdevtype2index(unsigned char type) {
-    return ~(unsigned char)ID_MASK
-
-} */
+extern bool wpHeartBeat(unsigned char id, unsigned int timeout,atomic *flag);
 
 
 #endif /*__CAN__WP__H__*/
