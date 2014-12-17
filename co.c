@@ -591,6 +591,10 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     co_run->prerpm = co_run->rpm;
     S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
 
+    if (stepindex >= co_run->numofstep) {
+        return -1;
+    }
+    
     //calculate speed;
     uint32 acc;
     if (step->speed != NULL) {
@@ -645,6 +649,30 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     return co_run->numofline[size] - line->iline - 1;
 }
 
+
+bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size) {
+    if (line >= co_run->numofline[size]) {
+        return false;
+    }
+    //seek 0
+    co_run->istep = 0;                   //step conter when run;   			//当前STEP
+    co_run->nextline =0;                                                //下一行
+    co_run->nextstep = 0;               //nextstep != istep+1, due to economizer
+    co_run->prerpm = 0;
+    co_run->rpm = 0;
+    co_run->iecono = 0;                  //current economizer counter
+    co_run->econonum = 0;                //economizer
+    co_run->econostepfrom = 0;           //economizer begin step
+    co_run->econostepto = 0;             //economizer end step(end>begin)
+    co_run->speedAcc = 0;                //speed acceleration when run
+    co_run->targetSpeed = 0;             //target speed when ramp
+    //seek line;
+    S_CO_RUN_LINE dummyline;
+    for (int i=0;i<line;i++) {
+        corunReadLine(co_run, &dummyline, size);
+    }
+    return true;
+}
 
 
 

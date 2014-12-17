@@ -336,16 +336,19 @@ typedef struct __S_CO_RUN
     uint16 istep;                   //step conter when run;   			//当前STEP
     uint16 nextline;                                                //下一行
     uint16 nextstep;                //nextstep != istep+1, due to economizer
+
     uint16 prerpm;
     uint16 rpm;
+    int16 speedAcc;                //speed acceleration when run
+    uint16 targetSpeed;             //target speed when ramp
+                                    //
     uint16 iecono;                  //current economizer counter
     uint16 econonum;                //economizer
     uint16 econostepfrom;           //economizer begin step
     uint16 econostepto;             //economizer end step(end>begin)
+                                    //
     uint16 numofline[8];            //number of line ,>=numofstep due to economizer   总圈数
     uint16 numofstep;               //number offset step ,equal to CO::numofstep		总步数
-    int16 speedAcc;                //speed acceleration when run
-    uint16 targetSpeed;             //target speed when ramp
     S_CO *co;                         //poit to associated co
     S_CO_RUN_STEP *stepptr[200];      //point to S_CO_RUN_STEP list element
     struct list_head step;          //CO_RUN_STEP list
@@ -377,6 +380,7 @@ extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
 extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
+extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void coRelease(S_CO *co);
 
 #endif
