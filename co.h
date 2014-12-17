@@ -270,10 +270,12 @@ typedef struct
 __packed typedef struct
 {
     uint32 flag;
-    uint32 headsize;
-    uint32 unkown[5];
+    uint32 unkown;
+    uint32 unkown1[5];
     uint32 size;
-    uint32 unkown1[15];
+    uint32 unkown2;
+    uint32 headsize;
+    uint32 unkown3[13];
 }
 CO_ECONOMIZER_HEAD;
 

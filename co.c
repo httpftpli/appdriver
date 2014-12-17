@@ -257,6 +257,11 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num
             econo[i].economize[j] = param.economize[j][0];
         }
     }
+    //read end 4 byte ,should be 0x00;
+    r = f_read(file, &numtemp, 4 ,&br);
+    if (r != FR_OK || br != 4 || numtemp!=0) {
+        return false;
+    }
     return true;
 }
 
@@ -497,6 +502,16 @@ static void  cocreateindex_speed(S_CO_RUN *co_run, S_CO *co){
 
 static void  cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
     uint32 iecon = 0;
+    if (co->numofeconomizer==0) {
+        for (int i = 0; i < 8; i++) {
+             co_run->numofline[i] = co->numofstep;
+        }
+        for (int i=0;i<co->numofstep;i++) {
+             co_run->stepptr[i]->econo = NULL;
+             co_run->stepptr[i]->econoFlag = 0;
+        }
+        return;
+    }
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
         if (co->econo[iecon].end == i) { //tag economizer begin
