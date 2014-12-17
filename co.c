@@ -340,7 +340,7 @@ bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
 
 
     //512 aligne
-    uint32 coPart2Offset = BOUNDUP(512 + coattri1->co_size, 512);
+    uint32 coPart2Offset = BOUNDUP(512 + coattri1->co_size, 256);
     f_lseek(&file, coPart2Offset);
     //read part2 of CO ,including chain;
 
@@ -622,7 +622,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->rpm = co_run->rpm;
     line->econonum = co_run->econonum;
     line->iecono = co_run->iecono;
-    line->econobegin = co_run->econostepfrom; 
+    line->econobegin = co_run->econostepfrom;
     line->econoend = co_run->econostepto ;
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
