@@ -595,13 +595,13 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     if (stepindex >= co_run->numofstep) {
         return -1;
     }
-    
+
     //calculate speed;
-    uint32 acc;
+    int16 acc;
     if (step->speed != NULL) {
-        uint32 tarrpm = step->speed->rpm;
+        int32 tarrpm = step->speed->rpm;
         uint32 ramp = step->speed->ramp[size];
-        acc = (tarrpm - co_run->prerpm) / ramp;
+        acc = (tarrpm - (int32)co_run->prerpm) / (int32)ramp;
         co_run->speedAcc = acc;
         co_run->targetSpeed = tarrpm;
     }
@@ -612,7 +612,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     } else if (co_run->speedAcc > 0 && line->rpm > co_run->targetSpeed) {
         co_run->rpm = co_run->targetSpeed;
     }
-    if (co_run->rpm = co_run->targetSpeed) {
+    if (co_run->rpm == co_run->targetSpeed) {
         co_run->speedAcc = 0;
     }
 
