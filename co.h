@@ -331,8 +331,8 @@ typedef struct
 
 typedef struct __S_CO_RUN
 {
-    uint16 istep;                   //step conter when run;   			//å½“å‰STEP
-    uint16 nextline;                                                //ä¸‹ä¸€è¡Œ
+    uint16 istep;                   //step conter when run;   			//µ±Ç°STEP
+    uint16 nextline;                                                //ÏÂÒ»ĞĞ
     uint16 nextstep;                //nextstep != istep+1, due to economizer
     uint16 prerpm;
     uint16 rpm;
@@ -340,8 +340,8 @@ typedef struct __S_CO_RUN
     uint16 econonum;                //economizer
     uint16 econostepfrom;           //economizer begin step
     uint16 econostepto;             //economizer end step(end>begin)
-    uint16 numofline[8];            //number of line ,>=numofstep due to economizer   æ€»åœˆæ•°
-    uint16 numofstep;               //number offset step ,equal to CO::numofstep		æ€»æ­¥æ•°
+    uint16 numofline[8];            //number of line ,>=numofstep due to economizer   ×ÜÈ¦Êı
+    uint16 numofstep;               //number offset step ,equal to CO::numofstep		×Ü²½Êı
     int16 speedAcc;                //speed acceleration when run
     uint16 targetSpeed;             //target speed when ramp
     S_CO *co;                         //poit to associated co
@@ -354,13 +354,17 @@ typedef struct __S_CO_RUN
 
 typedef struct
 {
-    uint16 istep;                    //å½“å‰STEP
-    uint16 iecono;                   //å½“å‰å¾ªç¯
-    uint16 econonum;                 //å½“å‰å¾ªç¯æ€»å…±å¾ªç¯
-    uint16 iline;                          //å®é™…å½“å‰åœˆæ•°
-    uint16 rpm;                          //å½“å‰åœˆè®¾å®šé€Ÿåº¦
-    uint32 sizemotor;                 //æ­¥è¿›ç”µæœºå€¼
-    bool willAct;                       //ä¸‹ä¸€åœˆä¸‰è§’æ°”é˜€æ˜¯å¦æœ‰åŠ¨ä½œ
+    uint16 istep;                    //µ±Ç°STEP
+    uint16 iline;                    //Êµ¼Êµ±Ç°È¦Êı
+                                    
+    uint16 iecono;                   //µ±Ç°Ñ­»·
+    uint16 econobegin;              //µ±Ç°Ñ­»·Ê×,Èç¹ûÃ»ÓĞÑ­»·Îª0
+    uint16 econoend;                //µ±Ç°Ñ­»·Î²,Èç¹ûÃ»ÓĞÑ­»·Îª0
+    uint16 econonum;                 //µ±Ç°Ñ­»·×Ü¹²Ñ­»·
+   
+    uint16 rpm;                        //µ±Ç°È¦Éè¶¨ËÙ¶È
+    uint32 sizemotor;                 //²½½øµç»úÖµ
+    bool willAct;                      //ÏÂÒ»È¦Èı½ÇÆø·§ÊÇ·ñÓĞ¶¯×÷
 }S_CO_RUN_LINE;
 //==============================================================================
 //==============================================================================
