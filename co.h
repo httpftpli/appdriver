@@ -275,7 +275,7 @@ __packed typedef struct
     uint32 size;
     uint32 unkown2;
     uint32 headsize;
-    uint32 unkown3[13];
+    //uint32 unkown3[13];
 }
 CO_ECONOMIZER_HEAD;
 

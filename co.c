@@ -232,7 +232,7 @@ static bool readMotorHeader(FIL *file, MOTOR_HEADER_PARAM *motor, unsigned int n
 }
 
 static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num) {
-    //uint32 offset= f_tell(file);
+    uint32 offset= f_tell(file);
     CO_ECONOMIZER_HEAD econo_head;
     CO_ECONOMIZER_PARAM param;
     uint32 br;
@@ -246,6 +246,7 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num
     }
     uint32 numtemp = (econo_head.size - econo_head.headsize) / sizeof(CO_ECONOMIZER_PARAM);
     *num = numtemp;
+    f_lseek(file,offset + econo_head.headsize);
     for (int i = 0; i < numtemp; i++) {
         r = f_read(file, &param, sizeof param ,&br);
         if (r != FR_OK || br != sizeof param) {
