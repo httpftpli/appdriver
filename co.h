@@ -375,6 +375,7 @@ typedef struct
 //==============================================================================
 //================================================================================
 extern void coInit();
+extern bool coMd5(const TCHAR *path,void *md5,int md5len);
 extern bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset);
 extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);

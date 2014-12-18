@@ -275,6 +275,31 @@ static bool coCheck(S_CO *co) {
 }
 
 
+bool coMd5(const TCHAR *path,void *md5,int md5len){
+    ASSERT(md5len>=16);
+    uint8 buf[1024];
+    FIL file;
+    if(f_open(&file,path,FA_READ)!=FR_OK){
+        return false;
+    }
+    uint32 br;
+    MD5_CTX context;
+    MD5Init(&context);
+    while(1){
+        if(f_read(&file,buf,sizeof buf,&br)!=FR_OK){
+            f_close(&file);
+            return false;
+        }
+        MD5Update(&context,buf,br);
+        if (br !=sizeof buf) {
+            MD5Final(&context,(unsigned char *)md5);
+            f_close(&file);
+            return true;
+        }
+    }
+    return false;
+}
+
 
 bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
@@ -609,7 +634,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     co_run->rpm = co_run->prerpm + co_run->speedAcc;
     if (co_run->speedAcc < 0 && co_run->rpm < co_run->targetSpeed) {
         co_run->rpm = co_run->targetSpeed;
-    } else if (co_run->speedAcc > 0 && line->rpm > co_run->targetSpeed) {
+    } else if (co_run->speedAcc > 0 && co_run->rpm > co_run->targetSpeed) {
         co_run->rpm = co_run->targetSpeed;
     }
     if (co_run->rpm == co_run->targetSpeed) {
