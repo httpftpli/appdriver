@@ -140,7 +140,7 @@ static bool readSpeed(FIL *file, SPEED *speed, unsigned int *num) {
 bool readFunc(FIL *file, struct list_head *funclist, unsigned int *step) {
     *step = 0;
     unsigned fileoffset = f_tell(file);
-    unsigned int size,  br;
+    unsigned int size, br;
     FRESULT r = f_read(file, &size, sizeof size,&br);
     if (r != FR_OK || br != sizeof size) {
         //re = CO_FILE_READ_ERROR;
@@ -159,9 +159,9 @@ bool readFunc(FIL *file, struct list_head *funclist, unsigned int *step) {
         addr += fileoffset;
         f_lseek(file, addr);
         //read func;
-        FUNC *func  = list_entry(funcfreelist.next, FUNC, list);
+        FUNC *func = list_entry(funcfreelist.next, FUNC, list);
         while (1) {
-            func  = list_entry(funcfreelist.next, FUNC, list);
+            func = list_entry(funcfreelist.next, FUNC, list);
             r = f_read(file, func, 2, &br);
             if (func->angular != 0x8000) {
                 r = f_read(file, &func->angular, 4, &br);
@@ -204,7 +204,7 @@ static bool readFengmen(FIL *file, struct list_head *fengmenlist, unsigned int *
         //read func;
         FENGMEN *fengmen;
         while (1) {
-            fengmen  = list_entry(fengmenfreelist.next, FENGMEN, list);
+            fengmen = list_entry(fengmenfreelist.next, FENGMEN, list);
             r = f_read(file, fengmen, 2, &br);
             if (fengmen->angular != 0x8000) {
                 r = f_read(file, &fengmen->angular, sizeof(FENGMEN) - 2 - sizeof(struct list_head), &br);
@@ -232,7 +232,7 @@ static bool readMotorHeader(FIL *file, MOTOR_HEADER_PARAM *motor, unsigned int n
 }
 
 static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num) {
-    uint32 offset= f_tell(file);
+    uint32 offset = f_tell(file);
     CO_ECONOMIZER_HEAD econo_head;
     CO_ECONOMIZER_PARAM param;
     uint32 br;
@@ -246,7 +246,7 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num
     }
     uint32 numtemp = (econo_head.size - econo_head.headsize) / sizeof(CO_ECONOMIZER_PARAM);
     *num = numtemp;
-    f_lseek(file,offset + econo_head.headsize);
+    f_lseek(file, offset + econo_head.headsize);
     for (int i = 0; i < numtemp; i++) {
         r = f_read(file, &param, sizeof param ,&br);
         if (r != FR_OK || br != sizeof param) {
@@ -259,8 +259,8 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num
         }
     }
     //read end 4 byte ,should be 0x00;
-    r = f_read(file, &numtemp, 4 ,&br);
-    if (r != FR_OK || br != 4 || numtemp!=0) {
+    r = f_read(file, &numtemp, 4, &br);
+    if (r != FR_OK || br != 4 || numtemp != 0) {
         return false;
     }
     return true;
@@ -275,24 +275,24 @@ static bool coCheck(S_CO *co) {
 }
 
 
-bool coMd5(const TCHAR *path,void *md5,int md5len){
-    ASSERT(md5len>=16);
+bool coMd5(const TCHAR *path, void *md5, int md5len) {
+    ASSERT(md5len >= 16);
     uint8 buf[1024];
     FIL file;
-    if(f_open(&file,path,FA_READ)!=FR_OK){
+    if (f_open(&file, path, FA_READ) != FR_OK) {
         return false;
     }
     uint32 br;
     MD5_CTX context;
     MD5Init(&context);
-    while(1){
-        if(f_read(&file,buf,sizeof buf,&br)!=FR_OK){
+    while (1) {
+        if (f_read(&file, buf, sizeof buf,&br) != FR_OK) {
             f_close(&file);
             return false;
         }
-        MD5Update(&context,buf,br);
-        if (br !=sizeof buf) {
-            MD5Final(&context,(unsigned char *)md5);
+        MD5Update(&context, buf, br);
+        if (br != sizeof buf) {
+            MD5Final(&context, (unsigned char *)md5);
             f_close(&file);
             return true;
         }
@@ -314,7 +314,7 @@ bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
         INIT_LIST_HEAD(&co->fengmen[i]);
     }
     //open co file
-    FRESULT  r = f_open(&file, path, FA_READ);
+    FRESULT r = f_open(&file, path, FA_READ);
     if (r != FR_OK) {
         //re = CO_FILE_OPEN_ERROR;
         return false;
@@ -375,7 +375,7 @@ bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
     f_lseek(&file, coPart2Offset);
     //read part2 of CO ,including chain;
 
-    CO_PART2_ATTRIB *coattri2 =  (CO_PART2_ATTRIB *)buf;
+    CO_PART2_ATTRIB *coattri2 = (CO_PART2_ATTRIB *)buf;
     r = f_read(&file, coattri2, sizeof*coattri2,&br);
     if (r != FR_OK || br != sizeof*coattri2) {
         //re = CO_FILE_READ_ERROR;
@@ -435,8 +435,8 @@ bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
     }
 
 //read fengmen
-    coattri4->fengmen2addr +=  coPart4Offset;
-    coattri4->fengmen1addr +=  coPart4Offset;
+    coattri4->fengmen2addr += coPart4Offset;
+    coattri4->fengmen1addr += coPart4Offset;
     f_lseek(&file, coattri4->fengmen2addr);
     if (!readFengmen(&file, co->fengmen, &step) || step != co->numofstep) {
         goto ERROR;
@@ -512,8 +512,8 @@ void coRelease(S_CO *co) {
 
 
 
-static void  cocreateindex_speed(S_CO_RUN *co_run, S_CO *co){
-    uint32  ispeed = 0;
+static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
+    uint32 ispeed = 0;
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
         if (co->speed[ispeed].step == i) {
@@ -526,15 +526,15 @@ static void  cocreateindex_speed(S_CO_RUN *co_run, S_CO *co){
 
 
 
-static void  cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
+static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
     uint32 iecon = 0;
-    if (co->numofeconomizer==0) {
+    if (co->numofeconomizer == 0) {
         for (int i = 0; i < 8; i++) {
-             co_run->numofline[i] = co->numofstep;
+            co_run->numofline[i] = co->numofstep;
         }
-        for (int i=0;i<co->numofstep;i++) {
-             co_run->stepptr[i]->econo = NULL;
-             co_run->stepptr[i]->econoFlag = 0;
+        for (int i = 0; i < co->numofstep; i++) {
+            co_run->stepptr[i]->econo = NULL;
+            co_run->stepptr[i]->econoFlag = 0;
         }
         return;
     }
@@ -564,7 +564,7 @@ static void  cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
 
 
 static void cocreateindex_sizemotor(S_CO_RUN *co_run, S_CO *co) {
-    uint32  isizemotorzone = 0;
+    uint32 isizemotorzone = 0;
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
         if (co->sizemotor[isizemotorzone].head.beginStep >= i && co->sizemotor[isizemotorzone].head.endStep <= i) {
@@ -649,7 +649,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
         co_run->econostepto = step->econo->end;
     }
     if (IS_ECONO_END(*step)) { //loop end
-        if (co_run->iecono  == co_run->econonum) { //end loop
+        if (co_run->iecono == co_run->econonum) { //end loop
             co_run->nextstep++;
             co_run->iecono = 0;
             co_run->econostepfrom = 0;
@@ -668,7 +668,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->econonum = co_run->econonum;
     line->iecono = co_run->iecono;
     line->econobegin = co_run->econostepfrom;
-    line->econoend = co_run->econostepto ;
+    line->econoend = co_run->econostepto;
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
 
@@ -676,13 +676,13 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 }
 
 
-bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size) {
+bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
     if (line >= co_run->numofline[size]) {
         return false;
     }
     //seek 0
     co_run->istep = 0;                   //step conter when run;   			//当前STEP
-    co_run->nextline =0;                                                //下一行
+    co_run->nextline = 0;                                                //下一行
     co_run->nextstep = 0;               //nextstep != istep+1, due to economizer
     co_run->prerpm = 0;
     co_run->rpm = 0;
@@ -692,14 +692,74 @@ bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size) {
     co_run->econostepto = 0;             //economizer end step(end>begin)
     co_run->speedAcc = 0;                //speed acceleration when run
     co_run->targetSpeed = 0;             //target speed when ramp
-    //seek line;
+                                         //seek line;
     S_CO_RUN_LINE dummyline;
-    for (int i=0;i<line;i++) {
+    for (int i = 0; i < line; i++) {
         corunReadLine(co_run, &dummyline, size);
     }
     return true;
 }
 
 
+typedef __packed struct {
+    char co[12];
+    short unknow;
+    uint32 product;
+    char dummy[12];
+}
+CN_GROUP;
 
 
+
+
+
+void createCn(const TCHAR *path, CN_GROUP *co) {
+
+
+}
+
+
+
+bool cnParas(const TCHAR *path, S_CN_GROUP *val) {
+    //open co file
+    FIL file;
+    uint32 br;
+    CN_GROUP cogp;
+    FRESULT r = f_open(&file, path, FA_READ);
+    if (r != FR_OK) {
+        //re = CO_FILE_OPEN_ERROR;
+        return false;
+    }
+    if (f_size(&file) != 512) {
+        goto ERROR;
+    }
+    f_lseek(&file, 0x16a);
+
+    for (int i = 0; i < 5; i++) {
+        r = f_read(&file, &cogp, sizeof cogp,&br);
+        if (r != FR_OK && br != sizeof cogp) {
+            goto ERROR;
+        }
+        cogp.co[8] = 0;
+        for (int j = 7; j > 0; j--) {
+            if (cogp.co[j] == 0x20) {
+                cogp.co[j] = 0;
+            } else {
+                break;
+            }
+        }
+        if (cogp.co[0] != 0) {
+            strcpy(val[i].filename, cogp.co);
+            strcat(val[i].filename, ".co");
+            val[i].num = cogp.product;
+        } else {
+            val[i].filename[0] = 0;
+            val[i].num = 0;
+        }
+    }
+    f_close(&file);
+    return true;
+ERROR:
+    f_close(&file);
+    return false;
+}

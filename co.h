@@ -371,6 +371,14 @@ typedef struct
     uint32 sizemotor;                 //步进电机值
     bool willAct;                      //下一圈三角气阀是否有动作
 }S_CO_RUN_LINE;
+
+
+typedef struct {
+    char filename[12];
+    uint32 num;
+}S_CN_GROUP;
+
+
 //==============================================================================
 //==============================================================================
 //================================================================================
@@ -383,5 +391,7 @@ extern void coRun(S_CO_RUN *co_run);
 extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void coRelease(S_CO *co);
+extern void createCn(const TCHAR *path, CN_GROUP *co);
+extern bool cnParas(const TCHAR *path, S_CN_GROUP *val);
 
 #endif
