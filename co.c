@@ -769,6 +769,8 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
         }
     } else {
         line->zonename = NULL;
+        line->zonebegin = 0;
+        line->zoneend = 0;
     }
 
     //welt;
