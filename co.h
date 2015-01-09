@@ -117,7 +117,7 @@ __packed typedef struct
     uint16 start[3];     //motor duplicate 3 times
     uint16 startWidth;
     uint16 startWidthDec; //dec: 0-0,1-0.25 3-0.75
-    uint16 end[3];  //cylinder duplicate 3 times
+    uint16 end[3];        //cylinder duplicate 3 times
     uint16 endWidth;
     uint16 endWidthDec; //dec: 0-0,1-0.25 3-0.75
 }
@@ -126,10 +126,10 @@ CO_SIZEMOTORPARAM;
 
 typedef struct
 {
-    uint16 start;
+    uint32 start;
     uint16 startWidth;
     uint16 startWidthDec; //dec: 0-0,1-0.25 3-0.75
-    uint16 end;
+    uint32 end;
     uint16 endWidth;
     uint16 endWidthDec; //dec: 0-0,1-0.25 3-0.75
     int32 acc;
@@ -178,8 +178,9 @@ CO_SINKERMOTOR_ZONE;
 
 typedef struct
 {
-    uint16 qi_feed;
-    uint16 qf_feed;
+    uint32 qi_feed;
+    uint32 qf_feed;
+    int32 acc;
 }SINKERMOTORPARAM;
 
 typedef struct

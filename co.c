@@ -66,8 +66,8 @@ static bool readSinkMotor(FIL *file, SINKERMOTOR_ZONE *zone, unsigned int *num) 
             zonetemp->head.groupNum = co_zone.head.groupNum;
 
             for (int i = 0; i < 8; i++) {
-                zonetemp->param[i].qf_feed = co_zone.param[i].qf_feed[0];
-                zonetemp->param[i].qi_feed = co_zone.param[i].qi_feed[0];
+                zonetemp->param[i].qf_feed = co_zone.param[i].qf_feed[0]*1000;
+                zonetemp->param[i].qi_feed = co_zone.param[i].qi_feed[0]*1000;
             }
             (*num)++;
         } else {
@@ -101,10 +101,10 @@ static bool readSizemotor(FIL *file, SIZEMOTOR_ZONE *zone, unsigned int *num) {
             zone_temp->head.groupNum = co_szone.head.groupNum;
 
             for (int i = 0; i < 8; i++) {
-                zone_temp->param[i].start = co_szone.param[i].start[0];
+                zone_temp->param[i].start = co_szone.param[i].start[0]*1000;
                 zone_temp->param[i].startWidth = co_szone.param[i].startWidth;
                 zone_temp->param[i].startWidthDec = co_szone.param[i].startWidthDec;
-                zone_temp->param[i].end = co_szone.param[i].end[0];
+                zone_temp->param[i].end = co_szone.param[i].end[0]*1000;
                 zone_temp->param[i].endWidth = co_szone.param[i].endWidth;
                 zone_temp->param[i].endWidthDec = co_szone.param[i].endWidthDec;
             }
@@ -639,9 +639,10 @@ static void cocreateindex_sizemotor(S_CO_RUN *co_run, S_CO *co) {
     uint32 isizemotorzone = 0;
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
-        if (co->sizemotor[isizemotorzone].head.beginStep <= i && co->sizemotor[isizemotorzone].head.endStep >= i) {
+        if (co->sizemotor[isizemotorzone].head.beginStep <= i
+            && co->sizemotor[isizemotorzone].head.endStep >= i) {
             step->sizemotor = &co->sizemotor[isizemotorzone];
-            if (co->sizemotor[i].head.endStep == i) {
+            if (co->sizemotor[isizemotorzone].head.endStep == i) {
                 isizemotorzone++;
             }
         } else {
@@ -649,13 +650,13 @@ static void cocreateindex_sizemotor(S_CO_RUN *co_run, S_CO *co) {
         }
     }
     for (int i = 0; i < co->numofsizemotorzone; i++) {
-        SIZEMOTOR_ZONE *zone = &co->sizemotor[isizemotorzone];
+        SIZEMOTOR_ZONE *zone = &co->sizemotor[i];
         uint32 beginstep = zone->head.beginStep;
         uint32 endstep = zone->head.endStep;
         for (int j = 0; j < 8; j++) {
-            uint32 linediff = co_run->stepptr[endstep]->ilinetag - co_run->stepptr[beginstep]->ilinetag;
+            uint32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
             if (linediff != 0) {
-                zone->param[j].acc = (zone->param[j].end - zone->param[j].start) * 1000 / linediff;
+                zone->param[j].acc = (zone->param[j].end - zone->param[j].start) / linediff;
             } else {
                 zone->param[j].acc = 0;
             }
@@ -761,8 +762,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
         int32 sizemotoracc = step->sizemotor->param[size].acc;
         uint32 sizemotorend = step->sizemotor->param[size].end;
         uint32 sizemotorbaseline = co_run->stepptr[step->sizemotor->head.beginStep]->ilinetag[size];
-        //uint32 sizemotorendline = co_run->stepptr[step->sizemotor->head.endStep]->ilinetag;
-        co_run->sizemotor = sizemotorbase * 1000 + sizemotoracc * (co_run->nextline - sizemotorbaseline);
+        co_run->sizemotor = sizemotorbase + sizemotoracc * (co_run->nextline - sizemotorbaseline);
         if ((sizemotoracc > 0 && co_run->sizemotor > sizemotorend)
             || (sizemotoracc < 0 && co_run->sizemotor < sizemotorend)) {
             co_run->sizemotor = sizemotorend;
