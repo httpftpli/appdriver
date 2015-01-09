@@ -430,6 +430,8 @@ typedef struct
 
     uint16 rpm;                        //当前圈设定速度
     char *zonename;
+    uint16 zonebegin;
+    uint16 zoneend;
     uint32 sizemotor;                 //步进电机值
     bool willAct;                      //下一圈三角气阀是否有动作
 }S_CO_RUN_LINE;

@@ -581,7 +581,7 @@ static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
 static void cocreateindex_func(S_CO_RUN *co_run, S_CO *co) {
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
-        if (list_empty(&co->func[i])){
+        if (list_empty(&co->func[i])) {
             step->func = NULL;
         } else {
             step->func = &co->func[i];
@@ -701,7 +701,7 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     //sizemotor;
     cocreateindex_sizemotor(co_run, co);
     //func
-    cocreateindex_func(co_run,co);
+    cocreateindex_func(co_run, co);
 
 
     co_run->numofstep = co->numofstep;
@@ -755,14 +755,16 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     SIZEMOTOR_ZONE *sizemotor_zone = step->sizemotor;
     if (sizemotor_zone != NULL) {
         line->zonename = step->sizemotor->descrpition;
+        line->zonebegin = step->sizemotor->head.beginStep;
+        line->zoneend = step->sizemotor->head.endStep;
         uint32 sizemotorbase = step->sizemotor->param[size].start;
         int32 sizemotoracc = step->sizemotor->param[size].acc;
         uint32 sizemotorend = step->sizemotor->param[size].end;
         uint32 sizemotorbaseline = co_run->stepptr[step->sizemotor->head.beginStep]->ilinetag[size];
-    //uint32 sizemotorendline = co_run->stepptr[step->sizemotor->head.endStep]->ilinetag;
+        //uint32 sizemotorendline = co_run->stepptr[step->sizemotor->head.endStep]->ilinetag;
         co_run->sizemotor = sizemotorbase * 1000 + sizemotoracc * (co_run->nextline - sizemotorbaseline);
         if ((sizemotoracc > 0 && co_run->sizemotor > sizemotorend)
-                    || (sizemotoracc < 0 && co_run->sizemotor < sizemotorend)) {
+            || (sizemotoracc < 0 && co_run->sizemotor < sizemotorend)) {
             co_run->sizemotor = sizemotorend;
         }
     } else {
@@ -845,7 +847,13 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     }
 
     //calculate sizemotor;
-    line->zonename = step->sizemotor->descrpition;
+    if (step->sizemotor != NULL) {
+        line->zonename = step->sizemotor->descrpition;
+        line->zonebegin = step->sizemotor->head.beginStep;
+        line->zoneend = step->sizemotor->head.endStep;
+    } else {
+        line->zonename = NULL;
+    }
 
     //welt;
     line->welt = co_run->welt = step->welt;
@@ -968,7 +976,7 @@ static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve) {
     for (int i = 0; i < 360; i++) {
         angleValve[i].num = 0; //cear ANGLE_VALVE::num ,  ANGLE_VALVE::inum
     }
-    if (func==NULL) {
+    if (func == NULL) {
         return;
     }
     list_for_each(p, func) {
@@ -1004,31 +1012,31 @@ static uint16 freeselcode2Valvecode(uint16 funcval) {
 static void fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num) {
     uint32 feed;
     if (funcval >= 0x1d && funcval <= 0x24) { //1x1i    sel line 16
-        feed = (funcval - 0x1d)/2;
+        feed = (funcval - 0x1d) / 2;
         *valvecode = !((funcval - 0x1d) % 2) << 12;
         *valvecode |= SEL_LINE_NUMBER * feed + 15 + SEL_BASE;
         *num = 1;
     } else if (funcval >= 0x25 && funcval <= 0x2c) { //MICRO
         *num = 0;
     } else if (funcval >= 0x2d && funcval <= 0x34) { //1X1O    sel line 14 15
-        feed = (funcval - 0x2d)/2;
+        feed = (funcval - 0x2d) / 2;
         uint16 inout = !((funcval - 0x2d) % 2) << 12;
         valvecode[0] = valvecode[1] = inout;
         valvecode[0] |= SEL_LINE_NUMBER * feed + 14 + SEL_BASE;
         valvecode[1] |= SEL_LINE_NUMBER * feed + 13 + SEL_BASE;
         *num = 2;
     } else if (funcval >= 0x35 && funcval <= 0x3c) { //3X1i    sel line 14
-        feed = (funcval - 0x35) /2;
+        feed = (funcval - 0x35) / 2;
         *valvecode = !((funcval - 0x35) % 2) << 12;
         *valvecode |= SEL_LINE_NUMBER * feed + 13 + SEL_BASE;
         *num = 1;
     } else if (funcval >= 0x3d && funcval <= 0x44) { //3X1o    sel line 15
-        feed = (funcval - 0x3d) /2;
+        feed = (funcval - 0x3d) / 2;
         *valvecode = !((funcval - 0x3d) % 2) << 12;
         *valvecode |= SEL_LINE_NUMBER * feed + 14 + SEL_BASE;
         *num = 1;
     } else if (funcval >= 0x45 && funcval <= 0x4c) { //1x3    sel line 14 16
-        feed = (funcval - 0x45) /2;
+        feed = (funcval - 0x45) / 2;
         uint16 inout = !((funcval - 0x45) % 2) << 12;
         valvecode[0] = valvecode[1] = inout;
         valvecode[0] |= SEL_LINE_NUMBER * feed + 15 + SEL_BASE;
@@ -1037,12 +1045,12 @@ static void fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num)
     } else if (funcval >= 0x4d && funcval <= 0x54) { //N-N
         *num = 0;
     } else if (funcval >= 0x55 && funcval <= 0x5c) { //O-O  sel line 12
-        feed = (funcval - 0x55) /2;
+        feed = (funcval - 0x55) / 2;
         *valvecode = !((funcval - 0x55) % 2) << 12;
         *valvecode |= SEL_LINE_NUMBER * feed + 11 + SEL_BASE;
         *num = 1;
     } else if (funcval >= 0x5D && funcval <= 0x64) { //T-BAND  sel line 12
-        feed = (funcval - 0x5D) /2;
+        feed = (funcval - 0x5D) / 2;
         *valvecode = !((funcval - 0x5D) % 2) << 12;
         *valvecode |= SEL_LINE_NUMBER * feed + 11 + SEL_BASE;
         *num = 1;
@@ -1080,11 +1088,11 @@ static uint16 misc0203code2Valvecode(uint16 codevalue) {
         re = inorout | ivalve + VALVE_MIS_BASE;
     } else if (codevalue >= 0x98 && codevalue <= 0xa9) {
         inorout = !(codevalue % 2) << 12;
-        ivalve = codevalue-(0x98-0x48) >> 2;
+        ivalve = codevalue - (0x98 - 0x48) >> 2;
         re = inorout | ivalve + VALVE_MIS_BASE;
     } else if (codevalue >= 0xb4 && codevalue <= 0xc3) {
         inorout = !(codevalue % 2) << 12;
-        ivalve = codevalue-(0xb4-0xaa)-(0x98-0x48) >> 2;
+        ivalve = codevalue - (0xb4 - 0xaa) - (0x98 - 0x48) >> 2;
         re = inorout | ivalve + VALVE_MIS_BASE;
     }
     return re;
@@ -1103,7 +1111,7 @@ static void funcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
             *valvecode = freeselcode2Valvecode(fun->value);
             *num = 1;
         } else if ((fun->value >= 0x1d && fun->value <= 0x64)
-                   ||(fun->value >= 0xa5 && fun->value <= 0xc4)) { // fix sel
+                   || (fun->value >= 0xa5 && fun->value <= 0xc4)) { // fix sel
             fixselcode2Valvecode(fun->value, valvecode, num);
         }
         break;
