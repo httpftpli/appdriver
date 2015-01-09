@@ -10,21 +10,26 @@
 
 
 
-FUNC __func[1000];
-struct list_head funcfreelist;
+static FUNC __func[1000];
+static struct list_head funcfreelist;
 
 
-FENGMEN __fengmen[1000];
-struct list_head fengmenfreelist;
+static FENGMEN __fengmen[1000];
+static struct list_head fengmenfreelist;
 
-S_CO_RUN_STEP __run_step[500];
-struct list_head runstepfreelist;
+static S_CO_RUN_STEP __run_step[500];
+static struct list_head runstepfreelist;
 
+static WELT_PARAM __welt_param_pool[20];
+static struct list_head welt_param_freelist;
+
+static ACT_GROUP act360[360];
 
 void coInit() {
     INIT_LIST_HEAD(&funcfreelist);
     INIT_LIST_HEAD(&fengmenfreelist);
     INIT_LIST_HEAD(&runstepfreelist);
+    INIT_LIST_HEAD(&welt_param_freelist);
     for (int i = 0; i < lenthof(__func); i++) {
         list_add_tail(&__func[i].list, &funcfreelist);
     }
@@ -33,6 +38,9 @@ void coInit() {
     }
     for (int i = 0; i < lenthof(__run_step); i++) {
         list_add_tail(&__run_step[i].list, &runstepfreelist);
+    }
+    for (int i = 0; i < lenthof(__welt_param_pool); i++) {
+        list_add_tail(&__welt_param_pool[i].list, &welt_param_freelist);
     }
 }
 
@@ -159,17 +167,22 @@ bool readFunc(FIL *file, struct list_head *funclist, unsigned int *step) {
         addr += fileoffset;
         f_lseek(file, addr);
         //read func;
-        FUNC *func = list_entry(funcfreelist.next, FUNC, list);
+        CO_FUNC cofunc;
         while (1) {
-            func = list_entry(funcfreelist.next, FUNC, list);
-            r = f_read(file, func, 2, &br);
-            if (func->angular != 0x8000) {
-                r = f_read(file, &func->angular, 4, &br);
-                if (func->unknow == 0x031f) {
-                    r = f_read(file, &func->add, 4, &br);
-                } else if (func->unknow == 0x030b) {
-                    r = f_read(file, &func->add, 2, &br);
+            FUNC *func = list_entry(funcfreelist.next, FUNC, list);
+            r = f_read(file, &cofunc, 2, &br);
+            if (cofunc.angular != 0x8000) {
+                r = f_read(file, &cofunc.value, 4, &br);
+                if (cofunc.funcode == 0x031f) {
+                    r = f_read(file, &cofunc.add, 4, &br);
+                } else if (cofunc.funcode == 0x030b) {
+                    r = f_read(file, &cofunc.add, 2, &br);
                 }
+                func->angular = cofunc.angular;
+                func->value = cofunc.value;
+                func->funcode = cofunc.funcode;
+                func->funcode = cofunc.funcode;
+                *(uint32 *)func->add = *(uint32 *)cofunc.add;
                 list_move_tail(&func->list, &funclist[i]);
             } else {
                 break;
@@ -231,23 +244,39 @@ static bool readMotorHeader(FIL *file, MOTOR_HEADER_PARAM *motor, unsigned int n
     return true;
 }
 
-static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num) {
-    uint32 offset = f_tell(file);
-    CO_ECONOMIZER_HEAD econo_head;
+
+static bool readWelt(FIL *file, struct list_head *weltListHead, uint32 num) {
+    CO_WELT_PARAM co_welt;
+    uint32 br;
+    for (int i = 0; i < num; i++) {
+        FRESULT r = f_read(file, &co_welt, sizeof co_welt ,&br);
+        if (r != FR_OK || br != sizeof co_welt) {
+            return false;
+        }
+        ASSERT(co_welt.weltflag == 0x2042 || co_welt.weltflag == 0x2062);
+        WELT_PARAM *welt;
+        if (co_welt.weltflag == 0x2042) { //welt in
+            welt = list_entry(welt_param_freelist.next, WELT_PARAM, list);
+            welt->weltinstep = co_welt.step;
+            list_move_tail(welt_param_freelist.next, weltListHead);
+        } else if (co_welt.weltflag == 0x2062) { //welt out
+            welt->weltoutstep = co_welt.step - 1;
+        }
+    }
+    //end flag 4byte should be 0
+    uint32 temp;
+    FRESULT r = f_read(file, &temp, 4, &br);
+    if (r != FR_OK || br != 4 || temp != 0) {
+        return false;
+    }
+    return true;
+}
+
+static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, uint32 num) {
     CO_ECONOMIZER_PARAM param;
     uint32 br;
-    FRESULT r = f_read(file, &econo_head, sizeof econo_head ,&br);
-    if (r != FR_OK || br != sizeof econo_head) {
-        return false;
-    }
-    ASSERT(econo_head.flag == 0xff);
-    if (econo_head.flag != 0xff) {
-        return false;
-    }
-    uint32 numtemp = (econo_head.size - econo_head.headsize) / sizeof(CO_ECONOMIZER_PARAM);
-    *num = numtemp;
-    f_lseek(file, offset + econo_head.headsize);
-    for (int i = 0; i < numtemp; i++) {
+    FRESULT r;
+    for (int i = 0; i < num; i++) {
         r = f_read(file, &param, sizeof param ,&br);
         if (r != FR_OK || br != sizeof param) {
             return false;
@@ -259,6 +288,7 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, unsigned int *num
         }
     }
     //read end 4 byte ,should be 0x00;
+    uint32 numtemp;
     r = f_read(file, &numtemp, 4, &br);
     if (r != FR_OK || br != 4 || numtemp != 0) {
         return false;
@@ -301,7 +331,7 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 }
 
 
-bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
+bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
     unsigned int br;
 
@@ -313,6 +343,8 @@ bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
     for (int i = 0; i < lenthof(co->fengmen); i++) {
         INIT_LIST_HEAD(&co->fengmen[i]);
     }
+    INIT_LIST_HEAD(&co->welt);
+
     //open co file
     FRESULT r = f_open(&file, path, FA_READ);
     if (r != FR_OK) {
@@ -461,8 +493,21 @@ bool coParas(const TCHAR *path, S_CO *co, unsigned int *offset) {
     }
 
     f_lseek(&file, f_tell(&file) - 4);
+
+    //read co_part5
+    CO_ATTRIB5 co_attib5;
+    r = f_read(&file, &co_attib5, sizeof co_attib5 ,&br);
+    if (r != FR_OK || br != sizeof co_attib5) {
+        goto ERROR;
+    }
+    //read welt;
+    if (!readWelt(&file, &co->welt,
+                  (co_attib5.econoAddrOffset - co_attib5.weltAddrOffset) / sizeof(CO_WELT_PARAM))) {
+        goto ERROR;
+    }
     //read economizers
-    if (!readEconomizer(&file, co->econo, &co->numofeconomizer)) {
+    co->numofeconomizer = (co_attib5.size - co_attib5.econoAddrOffset) / sizeof(CO_ECONOMIZER_PARAM);
+    if (!readEconomizer(&file, co->econo, co->numofeconomizer)) {
         goto ERROR;
     }
 
@@ -495,6 +540,14 @@ void coRelease(S_CO *co) {
             list_move(p, &fengmenfreelist);
         }
     }
+    //release welt
+    WELT_PARAM *welt;
+    list_for_each_safe(p, n, &co->welt) {
+        welt = list_entry(p, WELT_PARAM, list);
+        memset(welt, 0, sizeof(WELT_PARAM) - sizeof(welt->list)); //clear welt param but list member
+        list_move(p, &welt_param_freelist);
+    }
+
     //release CO_RUN
     if (co->run != NULL) {
         S_CO_RUN *run = co->run;
@@ -525,6 +578,18 @@ static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
+static void cocreateindex_func(S_CO_RUN *co_run, S_CO *co) {
+    for (int i = 0; i < co->numofstep; i++) {
+        S_CO_RUN_STEP *step = co_run->stepptr[i];
+        if (list_empty(&co->func[i])){
+            step->func = NULL;
+        } else {
+            step->func = &co->func[i];
+        }
+    }
+}
+
+
 
 static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
     uint32 iecon = 0;
@@ -548,15 +613,22 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
             beginstep->econoFlag |= ECONO_BEGIN;
             beginstep->econo = &co->econo[iecon];
             unsigned econodif = co->econo[iecon].end - co->econo[iecon].begin + 1;
-            for (int i = 0; i < 8; i++) {
-                co_run->numofline[i] += econodif * co->econo[iecon].economize[i];
+            for (int j = 0; j < 8; j++) {
+                co_run->numofline[j] += econodif * co->econo[iecon].economize[j];
+                if (i != 0) {
+                    co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j]
+                                                      + econodif * co->econo[iecon].economize[j];
+                }
             }
             iecon++;
         } else {
             step->econo = NULL;
             step->econoFlag = 0;
-            for (int i = 0; i < 8; i++) {
-                co_run->numofline[i]++;
+            for (int j = 0; j < 8; j++) {
+                co_run->numofline[j]++;
+                if (i != 0) {
+                    co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j] + 1;
+                }
             }
         }
     }
@@ -567,14 +639,47 @@ static void cocreateindex_sizemotor(S_CO_RUN *co_run, S_CO *co) {
     uint32 isizemotorzone = 0;
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
-        if (co->sizemotor[isizemotorzone].head.beginStep >= i && co->sizemotor[isizemotorzone].head.endStep <= i) {
+        if (co->sizemotor[isizemotorzone].head.beginStep <= i && co->sizemotor[isizemotorzone].head.endStep >= i) {
             step->sizemotor = &co->sizemotor[isizemotorzone];
             if (co->sizemotor[i].head.endStep == i) {
                 isizemotorzone++;
             }
+        } else {
+            step->sizemotor = NULL;
+        }
+    }
+    for (int i = 0; i < co->numofsizemotorzone; i++) {
+        SIZEMOTOR_ZONE *zone = &co->sizemotor[isizemotorzone];
+        uint32 beginstep = zone->head.beginStep;
+        uint32 endstep = zone->head.endStep;
+        for (int j = 0; j < 8; j++) {
+            uint32 linediff = co_run->stepptr[endstep]->ilinetag - co_run->stepptr[beginstep]->ilinetag;
+            if (linediff != 0) {
+                zone->param[j].acc = (zone->param[j].end - zone->param[j].start) * 1000 / linediff;
+            } else {
+                zone->param[j].acc = 0;
+            }
         }
     }
 }
+
+static void cocreateindex_welt(S_CO_RUN *co_run, S_CO *co) {
+    //clear all welt flag;
+    for (int i = 0; i < co->numofstep; i++) {
+        co_run->stepptr[i]->welt = false;
+    }
+
+    //set welt flag;
+    struct list_head *p;
+
+    list_for_each(p, &co->welt) {
+        WELT_PARAM *param = list_entry(p, WELT_PARAM, list);
+        for (int i = param->weltinstep; i <= param->weltoutstep; i++) {
+            co_run->stepptr[i]->welt = true;
+        }
+    }
+}
+
 
 
 void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
@@ -588,12 +693,15 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
 
     //speed;
     cocreateindex_speed(co_run, co);
-
+    //welt;
+    cocreateindex_welt(co_run, co);
     //economizer
     cocreateindex_econ(co_run, co);
 
     //sizemotor;
     cocreateindex_sizemotor(co_run, co);
+    //func
+    cocreateindex_func(co_run,co);
 
 
     co_run->numofstep = co->numofstep;
@@ -608,10 +716,12 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     co_run->nextline = 0;
     co_run->prerpm = 0;
     co_run->rpm = 0;
+
+    co_run->act = act360;
 }
 
 
-
+static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve);
 uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     uint32 stepindex = co_run->istep = co_run->nextstep;
     co_run->prerpm = co_run->rpm;
@@ -641,6 +751,30 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
         co_run->speedAcc = 0;
     }
 
+    //calculate sizemotor;
+    SIZEMOTOR_ZONE *sizemotor_zone = step->sizemotor;
+    if (sizemotor_zone != NULL) {
+        line->zonename = step->sizemotor->descrpition;
+        uint32 sizemotorbase = step->sizemotor->param[size].start;
+        int32 sizemotoracc = step->sizemotor->param[size].acc;
+        uint32 sizemotorend = step->sizemotor->param[size].end;
+        uint32 sizemotorbaseline = co_run->stepptr[step->sizemotor->head.beginStep]->ilinetag[size];
+    //uint32 sizemotorendline = co_run->stepptr[step->sizemotor->head.endStep]->ilinetag;
+        co_run->sizemotor = sizemotorbase * 1000 + sizemotoracc * (co_run->nextline - sizemotorbaseline);
+        if ((sizemotoracc > 0 && co_run->sizemotor > sizemotorend)
+                    || (sizemotoracc < 0 && co_run->sizemotor < sizemotorend)) {
+            co_run->sizemotor = sizemotorend;
+        }
+    } else {
+        line->zonename = NULL;
+    }
+
+    //welt;
+    line->welt = co_run->welt = step->welt;
+
+    //funcode
+    funcodeParse(step->func, co_run->act);
+
     //process step
     if (IS_ECONO_BEGIN(*step)) { // loop begin
         co_run->iecono++;
@@ -669,11 +803,74 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->iecono = co_run->iecono;
     line->econobegin = co_run->econostepfrom;
     line->econoend = co_run->econostepto;
+
+    line->sizemotor = co_run->sizemotor;
+
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
 
+    line->act = co_run->act;
+
     return co_run->numofline[size] - line->iline - 1;
 }
+
+
+uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    uint32 stepindex = co_run->istep = co_run->nextstep;
+    co_run->prerpm = co_run->rpm;
+    S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
+
+    if (stepindex >= co_run->numofstep) {
+        return -1;
+    }
+
+    //calculate speed;
+    int16 acc;
+    if (step->speed != NULL) {
+        int32 tarrpm = step->speed->rpm;
+        uint32 ramp = step->speed->ramp[size];
+        acc = (tarrpm - (int32)co_run->prerpm) / (int32)ramp;
+        co_run->speedAcc = acc;
+        co_run->targetSpeed = tarrpm;
+    }
+
+    co_run->rpm = co_run->prerpm + co_run->speedAcc;
+    if (co_run->speedAcc < 0 && co_run->rpm < co_run->targetSpeed) {
+        co_run->rpm = co_run->targetSpeed;
+    } else if (co_run->speedAcc > 0 && co_run->rpm > co_run->targetSpeed) {
+        co_run->rpm = co_run->targetSpeed;
+    }
+    if (co_run->rpm == co_run->targetSpeed) {
+        co_run->speedAcc = 0;
+    }
+
+    //calculate sizemotor;
+    line->zonename = step->sizemotor->descrpition;
+
+    //welt;
+    line->welt = co_run->welt = step->welt;
+
+    //funcode
+    funcodeParse(step->func, co_run->act);
+
+    //process step
+    co_run->nextstep++;
+    co_run->nextline = step->ilinetag[size] + 1;
+
+    //set line data;
+    line->rpm = co_run->rpm;
+    line->econonum = co_run->econonum;
+    line->iecono = co_run->iecono;
+    line->econobegin = co_run->econostepfrom;
+    line->econoend = co_run->econostepto;
+    line->iline = co_run->nextline - 1;
+    line->istep = stepindex;
+
+    line->act = co_run->act;
+
+    return co_run->numofline[size] - line->iline - 1;
+}
+
 
 
 bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
@@ -711,16 +908,14 @@ CN_GROUP;
 
 
 
-
-
-void createCn(const TCHAR *path, CN_GROUP *co) {
+void createCn(const TCHAR *path, S_CN_GROUP *co) {
 
 
 }
 
 
 
-bool cnParas(const TCHAR *path, S_CN_GROUP *val) {
+bool cnParse(const TCHAR *path, S_CN_GROUP *val) {
     //open co file
     FIL file;
     uint32 br;
@@ -759,7 +954,169 @@ bool cnParas(const TCHAR *path, S_CN_GROUP *val) {
     }
     f_close(&file);
     return true;
-ERROR:
+    ERROR:
     f_close(&file);
     return false;
 }
+
+
+
+static void funcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
+
+static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve) {
+    struct list_head *p;
+    for (int i = 0; i < 360; i++) {
+        angleValve[i].num = 0; //cear ANGLE_VALVE::num ,  ANGLE_VALVE::inum
+    }
+    if (func==NULL) {
+        return;
+    }
+    list_for_each(p, func) {
+        FUNC *fun = list_entry(p, FUNC, list);
+        uint32 angle = fun->angular;
+        uint32 valvecodenum;
+        funcode2Valvecode(fun, &angleValve[angle].valvecode[angleValve[angle].num], &valvecodenum);
+        angleValve[angle].num += valvecodenum;
+    }
+}
+
+
+static uint16 freeselcode2Valvecode(uint16 funcval) {
+    uint16 valvecode;
+    uint32 line, feed;
+    if (funcval >= 0x65 && funcval <= 0xa4) { //free sel line 1 to line8
+        valvecode = !((funcval - 0x65) % 2) << 12;  //in:1<<12  out:0<<12
+        line = (funcval - 0x65) / 8;
+        feed = (funcval - 0x65) / 2 % 4;
+        valvecode |= SEL_LINE_NUMBER * feed + line + SEL_BASE;
+    } else if (funcval >= 0xc5 && funcval <= 0x104) { //free sel line 9 to line 16
+        valvecode = (!(funcval - 0xc5) % 2) << 12;  //in:1<<12  out:0<<12
+        line = (funcval - 0xc5) / 8 + 8;
+        feed = (funcval - 0xc5) / 2 % 4;
+        valvecode |= SEL_LINE_NUMBER * feed + line + SEL_BASE;
+    }
+    return valvecode;
+}
+
+
+
+
+static void fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num) {
+    uint32 feed;
+    if (funcval >= 0x1d && funcval <= 0x24) { //1x1i    sel line 16
+        feed = (funcval - 0x1d)/2;
+        *valvecode = !((funcval - 0x1d) % 2) << 12;
+        *valvecode |= SEL_LINE_NUMBER * feed + 15 + SEL_BASE;
+        *num = 1;
+    } else if (funcval >= 0x25 && funcval <= 0x2c) { //MICRO
+        *num = 0;
+    } else if (funcval >= 0x2d && funcval <= 0x34) { //1X1O    sel line 14 15
+        feed = (funcval - 0x2d)/2;
+        uint16 inout = !((funcval - 0x2d) % 2) << 12;
+        valvecode[0] = valvecode[1] = inout;
+        valvecode[0] |= SEL_LINE_NUMBER * feed + 14 + SEL_BASE;
+        valvecode[1] |= SEL_LINE_NUMBER * feed + 13 + SEL_BASE;
+        *num = 2;
+    } else if (funcval >= 0x35 && funcval <= 0x3c) { //3X1i    sel line 14
+        feed = (funcval - 0x35) /2;
+        *valvecode = !((funcval - 0x35) % 2) << 12;
+        *valvecode |= SEL_LINE_NUMBER * feed + 13 + SEL_BASE;
+        *num = 1;
+    } else if (funcval >= 0x3d && funcval <= 0x44) { //3X1o    sel line 15
+        feed = (funcval - 0x3d) /2;
+        *valvecode = !((funcval - 0x3d) % 2) << 12;
+        *valvecode |= SEL_LINE_NUMBER * feed + 14 + SEL_BASE;
+        *num = 1;
+    } else if (funcval >= 0x45 && funcval <= 0x4c) { //1x3    sel line 14 16
+        feed = (funcval - 0x45) /2;
+        uint16 inout = !((funcval - 0x45) % 2) << 12;
+        valvecode[0] = valvecode[1] = inout;
+        valvecode[0] |= SEL_LINE_NUMBER * feed + 15 + SEL_BASE;
+        valvecode[1] |= SEL_LINE_NUMBER * feed + 13 + SEL_BASE;
+        *num = 2;
+    } else if (funcval >= 0x4d && funcval <= 0x54) { //N-N
+        *num = 0;
+    } else if (funcval >= 0x55 && funcval <= 0x5c) { //O-O  sel line 12
+        feed = (funcval - 0x55) /2;
+        *valvecode = !((funcval - 0x55) % 2) << 12;
+        *valvecode |= SEL_LINE_NUMBER * feed + 11 + SEL_BASE;
+        *num = 1;
+    } else if (funcval >= 0x5D && funcval <= 0x64) { //T-BAND  sel line 12
+        feed = (funcval - 0x5D) /2;
+        *valvecode = !((funcval - 0x5D) % 2) << 12;
+        *valvecode |= SEL_LINE_NUMBER * feed + 11 + SEL_BASE;
+        *num = 1;
+    } else { //1X1a 3X1a DIASX DIADX
+        *num = 0;
+    }
+}
+
+static uint16 hafuzhencode2Valvecode(uint16 funcval) {
+    /*uint32 phase = (funcval-0x0d)/2%2;
+    uint32 inorout = !((funcval-0x0d)%2);
+    uint32 enterexit = (funcval-0x0d)/4;
+    uint16 valvecode = inorout<<12;
+    valvecode |= HAFUZHEN_BALSE*/
+}
+
+
+static uint16 camcode2Valvecode(FUNC *fun) {
+    uint32 pos_ace = fun->value % 3;
+    uint32 sxt = fun->value / 3 % 3;
+    uint32 feed = fun->value / 9;
+}
+
+static uint16 yfingercode2Valvecode(uint16 codevalue) {
+    //YARN_FINGER_BASE
+}
+
+static uint16 misc0203code2Valvecode(uint16 codevalue) {
+    int16 inorout;
+    int16 ivalve;
+    int16 re;
+    if (codevalue <= 0x47) {
+        inorout = !(codevalue % 2) << 12;
+        ivalve = codevalue >> 2;
+        re = inorout | ivalve + VALVE_MIS_BASE;
+    } else if (codevalue >= 0x98 && codevalue <= 0xa9) {
+        inorout = !(codevalue % 2) << 12;
+        ivalve = codevalue-(0x98-0x48) >> 2;
+        re = inorout | ivalve + VALVE_MIS_BASE;
+    } else if (codevalue >= 0xb4 && codevalue <= 0xc3) {
+        inorout = !(codevalue % 2) << 12;
+        ivalve = codevalue-(0xb4-0xaa)-(0x98-0x48) >> 2;
+        re = inorout | ivalve + VALVE_MIS_BASE;
+    }
+    return re;
+}
+
+static void funcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
+    //uint16 val;
+    *num = 0;
+    switch (fun->funcode) {
+    case 0x031e: //sel
+        if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
+            *valvecode = hafuzhencode2Valvecode(fun->funcode);
+            *num = 1;
+        } else if ((fun->value >= 0x65 && fun->value <= 0xa4)
+                   || (fun->value >= 0xc5 && fun->value <= 0x104)) { //free sel line 1 to line8
+            *valvecode = freeselcode2Valvecode(fun->value);
+            *num = 1;
+        } else if ((fun->value >= 0x1d && fun->value <= 0x64)
+                   ||(fun->value >= 0xa5 && fun->value <= 0xc4)) { // fix sel
+            fixselcode2Valvecode(fun->value, valvecode, num);
+        }
+        break;
+    case 0x0305:  //cam
+        //camcode2Valvecode(FUNC * fun);
+        break;
+    }
+}
+
+
+
+
+
+
+
+
