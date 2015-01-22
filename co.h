@@ -13,8 +13,9 @@
 #define SEL_BASE   0
 #define SEL_LINE_NUMBER   32
 #define HAFUZHEN_NUMBER   32
-#define CAM_BASE  SEL_BASE+FEED_NUMBER*SEL_LINE_NUMBER
-#define CAM_LINE_NUMBER   16 
+#define HAFUZHEN_BASE     SEL_BASE + FEED_NUMBER * SEL_LINE_NUMBER
+#define CAM_BASE          HAFUZHEN_BASE + HAFUZHEN_NUMBER
+#define CAM_LINE_NUMBER   16
 #define YARN_FINGER_BASE  CAM_BASE + FEED_NUMBER*CAM_LINE_NUMBER
 #define YARN_LINE_NUMBER  16
 #define VALVE_MIS_BASE    YARN_FINGER_BASE + FEED_NUMBER*YARN_LINE_NUMBER
@@ -362,6 +363,7 @@ typedef struct
 
     SIZEMOTOR_ZONE *sizemotor;
     SINKERMOTOR_ZONE *sinkmoterzone_1_3;
+    SINKERMOTOR_ZONE *sinkmoterzone_2_4;
     struct list_head *func;
     struct list_head *fengmen;
     struct list_head list;
@@ -397,8 +399,11 @@ typedef struct __S_CO_RUN
     bool welt;                      //is_or_not in welt flag
 
     uint32 sizemotor;
+    uint32 sinkmotor1_3;
+    uint32 sinkmotor2_4;
 
     ACT_GROUP *act;
+    FENGMEN *fengmen[360];
 
     uint16 iecono;                  //current economizer counter
     uint16 econonum;                //economizer
@@ -429,11 +434,15 @@ typedef struct
 
     ACT_GROUP *act;
 
+    bool isfengmenAct;
+    FENGMEN *fengmen[360];
+
     uint16 rpm;                        //当前圈设定速度
     char *zonename;
     uint16 zonebegin;
     uint16 zoneend;
     uint32 sizemotor;                 //步进电机值
+    uint32 sinkmotor1_3;               //sinker motor
     bool willAct;                      //下一圈三角气阀是否有动作
 }S_CO_RUN_LINE;
 
@@ -443,6 +452,14 @@ typedef struct {
     uint32 num;
 }S_CN_GROUP;
 
+
+__packed typedef  struct {
+    char co[12];
+    short unknow;
+    uint32 product;
+    char dummy[12];
+}
+CN_GROUP;
 
 
 //==============================================================================
@@ -458,7 +475,8 @@ extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void coRelease(S_CO *co);
-extern void createCn(const TCHAR *path, S_CN_GROUP *co);
-extern bool cnParse(const TCHAR *path, S_CN_GROUP *val);
+
+extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co,unsigned int num);
+extern int cnParse(const TCHAR *path, S_CN_GROUP *val);
 
 #endif
