@@ -476,7 +476,8 @@ bool dmpAutoRegester(unsigned int devTypeIndex) {
         return r;
     }
     devn->stat |= DMP_DEV_DEV_ONLINEMASK;
-    list_sort_insert(&devn->list, &dmpSys.dev[devTypeIndex].regester,candmpsort);
+    //list_sort_insert(&devn->list, &dmpSys.dev[devTypeIndex].regester,candmpsort);
+    list_move_tail(&devn->list, &dmpSys.dev[devTypeIndex].regester);
     dmpDevDataClear(devr);
     list_move(&devr->list, &devlistheadfree);
     return true;
@@ -504,7 +505,8 @@ bool dmpRegester(DMP_DEV *dev, unsigned int id) {
     unsigned int uid = dev->uid;
     if (!dmpCanSetId(uid, id, 50)) return false;				//原来为30  出现未等到回码现象后修改为50
     dev->workid = id;
-    list_sort_insert(&dev->list, &devtype2devgroup(dev->hdtype)->regester,candmpsort);
+    //list_sort_insert(&dev->list, &devtype2devgroup(dev->hdtype)->regester,candmpsort);
+    list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->regester);
     dev->stat |= DMP_DEV_DEV_ONLINE;
     return true;
 }

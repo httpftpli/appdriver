@@ -221,7 +221,7 @@ void canQfRcv(CAN_WP *frame)
 	  case CAN_WP_FUNCODE_QF_ALARM:
 		qfban = (frame->srcid & 0xf) - 1;
 		if (qfban > 10) return;
-		SW_Value_Status[qfban].Value_ERR = (unsigned char)(frame->data[0]);
+		SW_Value_Status[qfban].Value_ERR = (~((unsigned char)(frame->data[0])))&0xf;
 		break;
 	  default:
 		break;
