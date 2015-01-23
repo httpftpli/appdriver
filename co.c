@@ -693,7 +693,7 @@ static void cocreateindex_sinkmotor(S_CO_RUN *co_run, S_CO *co) {
         uint32 beginstep = zone->head.beginStep;
         uint32 endstep = zone->head.endStep;
         for (int j = 0; j < 8; j++) {
-            uint32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
+            int32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
             if (linediff != 0) {
                 zone->param[j].acc = (zone->param[j].qf_feed - zone->param[j].qi_feed) / linediff;
             } else {
@@ -736,7 +736,7 @@ static void cocreateindex_sizemotor(S_CO_RUN *co_run, S_CO *co) {
         uint32 beginstep = zone->head.beginStep;
         uint32 endstep = zone->head.endStep;
         for (int j = 0; j < 8; j++) {
-            uint32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
+            int32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
             if (linediff != 0) {
                 zone->param[j].acc = (zone->param[j].end - zone->param[j].start) / linediff;
             } else {
@@ -837,8 +837,8 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     int16 acc;
     if (step->speed != NULL) {
         int32 tarrpm = step->speed->rpm;
-        uint32 ramp = step->speed->ramp[size];
-        acc = (tarrpm - (int32)co_run->prerpm) / (int32)ramp;
+        int32 ramp = step->speed->ramp[size];
+        acc = (tarrpm - (int32)co_run->prerpm) / ramp;
         co_run->speedAcc = acc;
         co_run->targetSpeed = tarrpm;
     }

@@ -127,10 +127,10 @@ CO_SIZEMOTORPARAM;
 
 typedef struct
 {
-    uint32 start;
+    int32 start;
     uint16 startWidth;
     uint16 startWidthDec; //dec: 0-0,1-0.25 3-0.75
-    uint32 end;
+    int32 end;
     uint16 endWidth;
     uint16 endWidthDec; //dec: 0-0,1-0.25 3-0.75
     int32 acc;
