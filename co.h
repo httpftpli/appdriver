@@ -443,6 +443,7 @@ typedef struct
     uint16 zoneend;
     uint32 sizemotor;                 //步进电机值
     uint32 sinkmotor1_3;               //sinker motor
+    uint32 sinkmotor2_4;
     bool willAct;                      //下一圈三角气阀是否有动作
 }S_CO_RUN_LINE;
 

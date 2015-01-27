@@ -808,9 +808,9 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
-static inline unsigned int Angle_To_Needles(unsigned int angle) {
+/*static inline unsigned int Angle_To_Needles(unsigned int angle) {
     return(angle * 400) / 360;
-}
+} */
 
 
 static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve);
@@ -902,16 +902,16 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
                                                  sinkermotoracc);
     }
     //fengmen
-    if (step->fengmen!=NULL) {
+    if (step->fengmen != NULL) {
         line->isfengmenAct = true;
-        memset(line->fengmen,0,sizeof line->fengmen );
+        memset(line->fengmen, 0, sizeof line->fengmen);
         struct list_head *p;
         FENGMEN *fengmenp;
-        list_for_each(p,step->fengmen){
-            fengmenp = list_entry(p,FENGMEN,list);
+        list_for_each(p, step->fengmen) {
+            fengmenp = list_entry(p, FENGMEN, list);
             line->fengmen[fengmenp->angular] = fengmenp;
         }
-    }else{
+    } else {
         line->isfengmenAct = false;
     }
     //welt;
@@ -951,6 +951,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 
     line->sizemotor = co_run->sizemotor;
     line->sinkmotor1_3 = co_run->sinkmotor1_3;
+    line->sinkmotor2_4 = co_run->sinkmotor2_4;
 
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
@@ -1094,9 +1095,9 @@ static void cnGroupTofile(S_CN_GROUP *group, CN_GROUP *group_file) {
     *(uint32 *)(&group_file->co[8]) = 0x206f632e; //".co"
     group_file->unknow = 0x4e01;
     group_file->product = group->num;
-    const static  char cnco_unknown[12] = {0x4E, 0x00, 0x00, 0x00, 0x00, 0x41,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-    memcpy(group_file->dummy, cnco_unknown,sizeof  cnco_unknown );
+    const static char cnco_unknown[12] = { 0x4E, 0x00, 0x00, 0x00, 0x00, 0x41,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+    memcpy(group_file->dummy, cnco_unknown, sizeof cnco_unknown);
 }
 
 
@@ -1133,9 +1134,9 @@ bool cnCreate(const TCHAR *path, S_CN_GROUP *co, uint32 num) {
     for (int i = 0; i < num; i++) {
         CN_GROUP group_file;
         cnGroupTofile(co + i, &group_file);
-        memcpy(&buf[0x16a + 30* i], &group_file, sizeof group_file);
+        memcpy(&buf[0x16a + 30 * i], &group_file, sizeof group_file);
     }
-    *(uint32 *)buf = get_co_check(buf+4,256-4);
+    *(uint32 *)buf = get_co_check(buf + 4, 256 - 4);
 
     r = f_write(&file, buf, 512, &bw);
     if (r != FR_OK || bw != 512) {
@@ -1309,10 +1310,24 @@ static uint16 hafuzhencode2Valvecode(uint16 funcval) {
 }
 
 
+static uint16 caminoutmap[4][3] = { //[feed][pos]
+    { 0, 293, 113 }, { 0, 23, 203}, { 0, 113, 293}, { 0, 203, 23}
+};
+
 static uint16 camcode2Valvecode(FUNC *fun) {
     uint32 pos_ace = fun->value % 3;
     uint32 sxt = fun->value / 3 % 3;
     uint32 feed = fun->value / 9;
+    uint32 code;
+    if (sxt == 1) {
+        return 0xffff;
+    }
+    if (caminoutmap[feed][pos_ace] == fun->angular) {
+        code = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 3 + pos_ace;
+    } else {
+        code = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 3 + pos_ace;
+    }
+    return code;
 }
 
 
@@ -1373,7 +1388,10 @@ static void funcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
         }
         break;
     case 0x0305:  //cam
-        //camcode2Valvecode(FUNC * fun);
+        *valvecode = camcode2Valvecode(fun);
+        if (*valvecode != 0xffff) {
+            *num = 1;
+        }
         break;
     }
 }

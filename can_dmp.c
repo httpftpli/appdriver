@@ -34,7 +34,7 @@
 
 
 extern mmcsdCtrlInfo mmcsdctr[2];
-DMP_SYSTEM dmpSys = { .num = { 4, 3, 10, 1 },};
+DMP_SYSTEM dmpSys = { .num = { 1, 2, 8, 1 },};
 
 static atomic setidflag,readidflag,jumptobootflag,presetidflag;
 unsigned char workid;
