@@ -387,9 +387,10 @@ typedef struct {
 
 typedef struct __S_CO_RUN
 {
-    uint16 istep;                   //step conter when run;  //当前STEP
+    int32 istep;                   //step conter when run; 
     uint32 nextline;                //下一行
-    uint16 nextstep;                //nextstep != istep+1, due to economizer
+    int32 nextstep;                //nextstep != istep+1, due to economizer
+    int32 prestep;
 
     uint16 prerpm;
     uint16 rpm;

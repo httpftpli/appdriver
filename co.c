@@ -825,6 +825,7 @@ static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc)
 
 
 uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    co_run->prestep = co_run->istep;
     uint32 stepindex = co_run->istep = co_run->nextstep;
     co_run->prerpm = co_run->rpm;
     S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
@@ -901,8 +902,14 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
                                                  sinkermotorbaseline, co_run->nextline,
                                                  sinkermotoracc);
     }
-    //fengmen
-    if (step->fengmen != NULL) {
+    //welt;
+    line->welt = co_run->welt = step->welt;
+
+    //funcode
+    funcodeParse(step->func, co_run->act);
+
+    //fengmen 
+    if (step->fengmen!=NULL && co_run->prestep!=co_run->istep) {
         line->isfengmenAct = true;
         memset(line->fengmen, 0, sizeof line->fengmen);
         struct list_head *p;
@@ -914,13 +921,8 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     } else {
         line->isfengmenAct = false;
     }
-    //welt;
-    line->welt = co_run->welt = step->welt;
 
-    //funcode
-    funcodeParse(step->func, co_run->act);
-
-    //process step
+    //process step ,calculate next step
     if (IS_ECONO_BEGIN(*step)) { // loop begin
         co_run->iecono++;
         co_run->econonum = step->econo->economize[size];
@@ -1031,9 +1033,12 @@ bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
         return false;
     }
     //seek 0
-    co_run->istep = 0;                   //step conter when run;   			//当前STEP
-    co_run->nextline = 0;                                                //下一行
-    co_run->nextstep = 0;               //nextstep != istep+1, due to economizer
+    co_run->prestep = -2;
+    co_run->istep = -1;  
+    co_run->nextstep = 0;               //nextstep != istep+1, due to economizer                 		
+
+    co_run->nextline = 0;
+     
     co_run->prerpm = 0;
     co_run->rpm = 0;
     co_run->iecono = 0;                  //current economizer counter
