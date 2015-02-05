@@ -23,7 +23,9 @@ static struct list_head runstepfreelist;
 static WELT_PARAM __welt_param_pool[20];
 static struct list_head welt_param_freelist;
 
-static ACT_GROUP act360[360];
+//static ACT_GROUP act360[360];
+
+//static ALARM_GROUP alarm360[360];
 
 
 static uint32 get_co_check(void *buf, uint32 dwSize) {
@@ -540,7 +542,7 @@ bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     if (!coCheck(co)) return false;
     return true;
 
-    ERROR:
+ERROR:
     *offset = (uint32)f_tell(&file);
     f_close(&file);
     return false;
@@ -653,7 +655,7 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
                 co_run->numofline[j] += econodif * co->econo[iecon].economize[j];
                 if (i != 0) {
                     co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j]
-                                                      + econodif * co->econo[iecon].economize[j];
+                        + econodif * co->econo[iecon].economize[j];
                 }
             }
             iecon++;
@@ -804,7 +806,8 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     co_run->prerpm = 0;
     co_run->rpm = 0;
 
-    co_run->act = act360;
+    //co_run->act = act360;
+    //co_run->alarm = alarm360;
 }
 
 
@@ -813,7 +816,7 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
 } */
 
 
-static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve);
+static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve,ALARM_GROUP *angleAlarm,uint32 *flag);
 
 static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc) {
     int32 val = y1 + acc * (x - x1);
@@ -906,10 +909,11 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->welt = co_run->welt = step->welt;
 
     //funcode
-    funcodeParse(step->func, co_run->act);
+    line->flag = 0;
+    funcodeParse(step->func, line->act,line->alarm, &line->flag);
 
-    //fengmen 
-    if (step->fengmen!=NULL && co_run->prestep!=co_run->istep) {
+    //fengmen
+    if (step->fengmen != NULL && co_run->prestep != co_run->istep) {
         line->isfengmenAct = true;
         memset(line->fengmen, 0, sizeof line->fengmen);
         struct list_head *p;
@@ -958,7 +962,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
 
-    line->act = co_run->act;
+    //line->act = co_run->act;
 
     return co_run->numofline[size] - line->iline - 1;
 }
@@ -1006,7 +1010,7 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->welt = co_run->welt = step->welt;
 
     //funcode
-    funcodeParse(step->func, co_run->act);
+    funcodeParse(step->func, line->act,line->alarm,&line->flag);
 
     //process step
     co_run->nextstep++;
@@ -1021,24 +1025,24 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
 
-    line->act = co_run->act;
+    //line->act = co_run->act;
 
     return co_run->numofline[size] - line->iline - 1;
 }
 
 
 
-bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
+static bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
     if (line >= co_run->numofline[size]) {
         return false;
     }
     //seek 0
     co_run->prestep = -2;
-    co_run->istep = -1;  
-    co_run->nextstep = 0;               //nextstep != istep+1, due to economizer                 		
+    co_run->istep = -1;
+    co_run->nextstep = 0;               //nextstep != istep+1, due to economizer
 
     co_run->nextline = 0;
-     
+
     co_run->prerpm = 0;
     co_run->rpm = 0;
     co_run->iecono = 0;                  //current economizer counter
@@ -1056,6 +1060,10 @@ bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
     return true;
 }
 
+
+void corunReset(S_CO_RUN *co_run,uint32 size){
+    corunSeekLine(co_run, 0, size);
+}
 
 
 
@@ -1210,15 +1218,16 @@ int cnParse(const TCHAR *path, S_CN_GROUP *val) {
     }
     f_close(&file);
     return re;
-    ERROR:
+ERROR:
     f_close(&file);
     return re;
 }
 
 
-static void funcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
+static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                            uint16 *alarmcode,uint32 *alarmnum,uint32 *flag);
 
-static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve) {
+static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve,ALARM_GROUP *angleAlarm,uint32 *flag) {
     struct list_head *p;
     for (int i = 0; i < 360; i++) {
         angleValve[i].num = 0; //cear ANGLE_VALVE::num ,  ANGLE_VALVE::inum
@@ -1230,9 +1239,13 @@ static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve) {
         FUNC *fun = list_entry(p, FUNC, list);
         uint32 angle = fun->angular;
         //uint32 angle = Angle_To_Needles(fun->angular);  //change angle to needle
-        uint32 valvecodenum;
-        funcode2Valvecode(fun, &angleValve[angle].valvecode[angleValve[angle].num], &valvecodenum);
+        uint32 valvecodenum = 0,alarmnum = 0,flagtemp = 0;
+        funcodeResolve(fun, &angleValve[angle].valvecode[angleValve[angle].num], &valvecodenum,
+                            &angleAlarm[angle].alarmcode[angleAlarm[angle].num], &alarmnum,
+                            &flagtemp);
         angleValve[angle].num += valvecodenum;
+        angleAlarm[angle].num += alarmnum;
+        *flag |= flagtemp;
     }
 }
 
@@ -1316,7 +1329,7 @@ static uint16 hafuzhencode2Valvecode(uint16 funcval) {
 
 
 static uint16 caminoutmap[4][3] = { //[feed][pos]
-    { 0, 293, 113 }, { 0, 23, 203}, { 0, 113, 293}, { 0, 203, 23}
+    { 0, 293, 113 }, { 0, 23, 203 }, { 0, 113, 293 }, { 0, 203, 23 }
 };
 
 static uint16 camcode2Valvecode(FUNC *fun) {
@@ -1366,36 +1379,73 @@ static uint16 misc0203code2Valvecode(uint16 codevalue) {
     return re;
 }
 
-static void funcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
+static uint16 funcode2Alarm(FUNC *func,uint32 *flag) {
+    uint16 alarmcode = 0;
+    if (func->funcode == 0x031e) {
+        switch (func->value) {
+        case 0x01:
+            alarmcode = 0;
+            *flag |= LINE_FLAG_F4;
+            break;
+        case 0x03:
+            alarmcode = 0x03;
+            break;
+        default:
+            break;
+        }
+    } else if (func->funcode == 0x0303) {
+        switch (func->value) {
+        case 0x10:
+            break;
+        case 0x11:
+            break;
+        default:
+            break;
+        }
+    }
+    return alarmcode;
+}
+
+
+
+static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                           uint16 *alarmcode,uint32 *alarmnum,uint32 *flag) {
     //uint16 val;
-    *num = 0;
+    *valnum = 0;
+    *alarmnum = 0;
     switch (fun->funcode) {
     case 0x031e: //sel
-        if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
+        if (fun->value < 0x0d) {
+            *alarmcode = funcode2Alarm(fun,flag);
+            if (*alarmcode!=0) {
+                *alarmnum = 1;
+            }
+        } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
             *valvecode = hafuzhencode2Valvecode(fun->funcode);
-            *num = 1;
+            *valnum = 1;
         } else if ((fun->value >= 0x65 && fun->value <= 0xa4)
                    || (fun->value >= 0xc5 && fun->value <= 0x104)) { //free sel line 1 to line8
             *valvecode = freeselcode2Valvecode(fun->value);
-            *num = 1;
+            *valnum = 1;
         } else if ((fun->value >= 0x1d && fun->value <= 0x64)
                    || (fun->value >= 0xa5 && fun->value <= 0xc4)) { // fix sel
-            fixselcode2Valvecode(fun->value, valvecode, num);
+            fixselcode2Valvecode(fun->value, valvecode, valnum);
         }
         break;
     case 0x0302: //YARN finger
         if (fun->value >= 0x48 && fun->value <= 0x98) {
             *valvecode = yarnfinger2Valvecode(fun->value);
-            *num = 1;
+            *valnum = 1;
         } else {
             *valvecode = misc0203code2Valvecode(fun->value);
-            *num = 1;
+            *valnum = 1;
         }
         break;
     case 0x0305:  //cam
         *valvecode = camcode2Valvecode(fun);
+        *flag |= LINE_FLAG_ACT;
         if (*valvecode != 0xffff) {
-            *num = 1;
+            *valnum = 1;
         }
         break;
     }

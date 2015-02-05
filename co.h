@@ -384,10 +384,15 @@ typedef struct {
 }ACT_GROUP;
 
 
+typedef struct{
+    uint16 num;
+    uint16 alarmcode[10];
+}ALARM_GROUP;
+
 
 typedef struct __S_CO_RUN
 {
-    int32 istep;                   //step conter when run; 
+    int32 istep;                   //step conter when run;
     uint32 nextline;                //下一行
     int32 nextstep;                //nextstep != istep+1, due to economizer
     int32 prestep;
@@ -402,9 +407,7 @@ typedef struct __S_CO_RUN
     uint32 sizemotor;
     uint32 sinkmotor1_3;
     uint32 sinkmotor2_4;
-
-    ACT_GROUP *act;
-    FENGMEN *fengmen[360];
+   // FENGMEN *fengmen[360];
 
     uint16 iecono;                  //current economizer counter
     uint16 econonum;                //economizer
@@ -419,7 +422,8 @@ typedef struct __S_CO_RUN
 }S_CO_RUN;
 
 
-
+#define LINE_FLAG_F4  0x01
+#define LINE_FLAG_ACT 0x02
 
 typedef struct
 {
@@ -433,9 +437,9 @@ typedef struct
     uint16 econoend;                //当前循环尾,如果没有循环为0
     uint16 econonum;                 //当前循环总共循环
 
-    ACT_GROUP *act;
-
     bool isfengmenAct;
+    ACT_GROUP act[360];
+    ALARM_GROUP alarm[360];
     FENGMEN *fengmen[360];
 
     uint16 rpm;                        //当前圈设定速度
@@ -445,7 +449,7 @@ typedef struct
     uint32 sizemotor;                 //步进电机值
     uint32 sinkmotor1_3;               //sinker motor
     uint32 sinkmotor2_4;
-    bool willAct;                      //下一圈三角气阀是否有动作
+    uint32 flag;
 }S_CO_RUN_LINE;
 
 
@@ -475,7 +479,8 @@ extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
 extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
-extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
+//extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
+extern void corunReset(S_CO_RUN *co_run,uint32 size);
 extern void coRelease(S_CO *co);
 
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co,unsigned int num);
