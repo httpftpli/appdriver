@@ -13,11 +13,13 @@
 static FUNC __func[1000];
 static struct list_head funcfreelist;
 
+static SPEED __speed[150];
+static struct list_head speedfreelist;
 
 static FENGMEN __fengmen[1000];
 static struct list_head fengmenfreelist;
 
-static S_CO_RUN_STEP __run_step[500];
+static S_CO_RUN_STEP __run_step[800];
 static struct list_head runstepfreelist;
 
 static WELT_PARAM __welt_param_pool[20];
@@ -58,6 +60,7 @@ void coInit() {
     INIT_LIST_HEAD(&fengmenfreelist);
     INIT_LIST_HEAD(&runstepfreelist);
     INIT_LIST_HEAD(&welt_param_freelist);
+    INIT_LIST_HEAD(&speedfreelist);
     for (int i = 0; i < lenthof(__func); i++) {
         list_add_tail(&__func[i].list, &funcfreelist);
     }
@@ -69,6 +72,9 @@ void coInit() {
     }
     for (int i = 0; i < lenthof(__welt_param_pool); i++) {
         list_add_tail(&__welt_param_pool[i].list, &welt_param_freelist);
+    }
+    for (int i = 0; i < lenthof(__speed); i++) {
+        list_add_tail(&__speed[i].list, &speedfreelist);
     }
 }
 
@@ -147,8 +153,7 @@ static bool readSizemotor(FIL *file, SIZEMOTOR_ZONE *zone, unsigned int *num) {
 }
 
 
-static bool readSpeed(FIL *file, SPEED *speed, unsigned int *num) {
-    *num = 0;
+static bool readSpeed(FIL *file, struct list_head *speed) {
     while (1) {
         CO_SPEED co_speed;
         uint32 br;
@@ -158,11 +163,12 @@ static bool readSpeed(FIL *file, SPEED *speed, unsigned int *num) {
             return false;
         }
         if (co_speed.step != 0xffffffff) {
-            SPEED *speedtemp = speed + *num;
+            SPEED *speedtemp = list_first_entry(&speedfreelist, SPEED, list);
             memcpy(speedtemp->ramp, co_speed.ramp, sizeof speedtemp->ramp);
             speedtemp->rpm = co_speed.rpm[0];
             speedtemp->step = co_speed.step;
-            (*num)++;
+            speedtemp->coed = true;
+            list_move_tail(&speedtemp->list, speed);
         } else {
             f_lseek(file, f_tell(file) - sizeof co_speed + 4); //back filepoint
             break;
@@ -326,9 +332,7 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, uint32 num) {
 
 
 static bool coCheck(S_CO *co) {
-    if (co->numofspeed < 1 || co->numofspeed > co->numofstep) {
-        return false;
-    }
+
     return true;
 }
 
@@ -370,6 +374,7 @@ bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     for (int i = 0; i < lenthof(co->fengmen); i++) {
         INIT_LIST_HEAD(&co->fengmen[i]);
     }
+    INIT_LIST_HEAD(&co->speed);
     INIT_LIST_HEAD(&co->welt);
 
     //open co file
@@ -473,7 +478,7 @@ bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     coattri3->func_addr += coPart3Offset;
     co->file_speedOff = coattri3->func_addr;
     f_lseek(&file, coattri3->speed_addr);
-    if (!readSpeed(&file, co->speed, &co->numofspeed)) {
+    if (!readSpeed(&file, &co->speed)) {
         goto ERROR;
     }
 
@@ -542,7 +547,7 @@ bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     if (!coCheck(co)) return false;
     return true;
 
-ERROR:
+    ERROR:
     *offset = (uint32)f_tell(&file);
     f_close(&file);
     return false;
@@ -551,6 +556,15 @@ ERROR:
 
 void coRelease(S_CO *co) {
     struct list_head *p,*n;
+
+
+    list_for_each_safe(p, n, &co->speed) {
+        //SPEED *speed = list_entry(p, SPEED, list);
+        //memset(func, 0, sizeof(FUNC) - sizeof(func->list)); //clear func but list member
+        list_move(p, &speedfreelist);
+    }
+
+
     FUNC *func;
     for (int i = 0; i < lenthof(co->func); i++) {
         list_for_each_safe(p, n, &co->func[i]) {
@@ -591,13 +605,28 @@ void coRelease(S_CO *co) {
 }
 
 
-
 static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
-    uint32 ispeed = 0;
+    SPEED *speed;
+    speed = list_first_entry(&co->speed, SPEED, list);
+    if (speed->step != 0) {
+        speed = list_first_entry(&speedfreelist, SPEED, list);
+        speed->step = 0;
+        speed->rpm = 50;
+        speed->coed = false;
+        for (int i = 0; i < 8; i++) {
+            //speed->prerpm[i] = 0;
+            speed->ramp[i] = 1;
+        }
+        list_move(&speed->list, &co->speed);
+    }
+
+    //init step->speed
+    speed = list_first_entry(&co->speed, SPEED, list);
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
-        if (co->speed[ispeed].step == i) {
-            step->speed = &co->speed[ispeed++];
+        if (speed->step == i) {
+            step->speed = speed;
+            speed = list_entry(step->list.next, SPEED, list);
         } else {
             step->speed = NULL;
         }
@@ -653,9 +682,9 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
             unsigned econodif = co->econo[iecon].end - co->econo[iecon].begin + 1;
             for (int j = 0; j < 8; j++) {
                 co_run->numofline[j] += econodif * co->econo[iecon].economize[j];
-                if (i != 0) {
-                    co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j]
-                        + econodif * co->econo[iecon].economize[j];
+                if (i != co->numofstep - 1) {
+                    co_run->stepptr[i + 1]->ilinetag[j] = co_run->stepptr[i]->ilinetag[j]
+                                                          + econodif * co->econo[iecon].economize[j];
                 }
             }
             iecon++;
@@ -776,12 +805,13 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
         list_move_tail(&step->list, &co_run->step);
     }
 
+    //economizer
+    cocreateindex_econ(co_run, co);
     //speed;
     cocreateindex_speed(co_run, co);
     //welt;
     cocreateindex_welt(co_run, co);
-    //economizer
-    cocreateindex_econ(co_run, co);
+
 
     //sizemotor;
     cocreateindex_sizemotor(co_run, co);
@@ -816,7 +846,7 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
 } */
 
 
-static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve,ALARM_GROUP *angleAlarm,uint32 *flag);
+static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve, ALARM_GROUP *angleAlarm, uint32 *flag);
 
 static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc) {
     int32 val = y1 + acc * (x - x1);
@@ -827,18 +857,10 @@ static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc)
 }
 
 
-uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
-    co_run->prestep = co_run->istep;
-    uint32 stepindex = co_run->istep = co_run->nextstep;
-    co_run->prerpm = co_run->rpm;
-    S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
-
-    if (stepindex >= co_run->numofstep) {
-        return -1;
-    }
-
+static void corunCalcSpeed(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     //calculate speed;
     int16 acc;
+    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
     if (step->speed != NULL) {
         int32 tarrpm = step->speed->rpm;
         int32 ramp = step->speed->ramp[size];
@@ -856,8 +878,13 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     if (co_run->rpm == co_run->targetSpeed) {
         co_run->speedAcc = 0;
     }
+    line->rpm = co_run->rpm;
+}
 
-    //calculate sizemotor;
+
+static void corunCalcSizemotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
+
     SIZEMOTOR_ZONE *sizemotor_zone = step->sizemotor;
     if (sizemotor_zone != NULL) {
         line->zonename = step->sizemotor->descrpition;
@@ -880,11 +907,12 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
         line->zonebegin = 0;
         line->zoneend = 0;
     }
+    line->sizemotor = co_run->sizemotor;
+}
 
-    //calculate sinker motor_1_3
+static void corunCalcSinkermotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
     SINKERMOTOR_ZONE *sinkermotor_zone_1_3 = step->sinkmoterzone_1_3;
-    uint32 sinkermotorbase, sinkermotorend, sinkermotorbaseline;
-    int32 sinkermotoracc;
     if (sinkermotor_zone_1_3 != NULL) {
         uint32 sinkermotorbase = sinkermotor_zone_1_3->param[size].qi_feed;
         int32 sinkermotoracc = sinkermotor_zone_1_3->param[size].acc;
@@ -894,13 +922,35 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
                                                  sinkermotorbaseline, co_run->nextline,
                                                  sinkermotoracc);
     }
+    line->sinkmotor1_3 = co_run->sinkmotor1_3;
+}
+
+uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    co_run->prestep = co_run->istep;
+    uint32 stepindex = co_run->istep = co_run->nextstep;
+    co_run->prerpm = co_run->rpm;
+    S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
+
+    if (stepindex >= co_run->numofstep) {
+        return -1;
+    }
+
+    //calculate speed
+    corunCalcSpeed(co_run, line, size);
+
+    //calculate sizemotor;
+    corunCalcSizemotor(co_run, line, size);
+
+    //calculate sinker motor_1_3
+    corunCalcSinkermotor(co_run,line,size);
+
     //calculate sinker motor_2_4
     SINKERMOTOR_ZONE *sinkermotor_zone_2_4 = step->sinkmoterzone_2_4;
     if (sinkermotor_zone_2_4 != NULL) {
-        sinkermotorbase = sinkermotor_zone_2_4->param[size].qi_feed;
-        sinkermotoracc = sinkermotor_zone_2_4->param[size].acc;
-        sinkermotorend = sinkermotor_zone_2_4->param[size].qf_feed;
-        sinkermotorbaseline = co_run->stepptr[sinkermotor_zone_2_4->head.beginStep]->ilinetag[size];
+        uint32 sinkermotorbase = sinkermotor_zone_2_4->param[size].qi_feed;
+        int32 sinkermotoracc = sinkermotor_zone_2_4->param[size].acc;
+        uint32 sinkermotorend = sinkermotor_zone_2_4->param[size].qf_feed;
+        uint32 sinkermotorbaseline = co_run->stepptr[sinkermotor_zone_2_4->head.beginStep]->ilinetag[size];
         co_run->sinkmotor2_4 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
                                                  sinkermotorbaseline, co_run->nextline,
                                                  sinkermotoracc);
@@ -910,7 +960,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 
     //funcode
     line->flag = 0;
-    funcodeParse(step->func, line->act,line->alarm, &line->flag);
+    funcodeParse(step->func, line->act, line->alarm, &line->flag);
 
     //fengmen
     if (step->fengmen != NULL && co_run->prestep != co_run->istep) {
@@ -949,14 +999,14 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 
     co_run->nextline++;
 
-    line->rpm = co_run->rpm;
+
     line->econonum = co_run->econonum;
     line->iecono = co_run->iecono;
     line->econobegin = co_run->econostepfrom;
     line->econoend = co_run->econostepto;
 
-    line->sizemotor = co_run->sizemotor;
-    line->sinkmotor1_3 = co_run->sinkmotor1_3;
+
+
     line->sinkmotor2_4 = co_run->sinkmotor2_4;
 
     line->iline = co_run->nextline - 1;
@@ -966,6 +1016,32 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 
     return co_run->numofline[size] - line->iline - 1;
 }
+
+
+void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
+    S_CO_RUN_STEP *nextstep = co_run->stepptr[co_run->istep + 1];
+    co_run->rpm = line->rpm = 200;
+
+    //calculate sizemotor;
+    corunCalcSizemotor(co_run, line, size);
+
+    //calculate sinker motor_1_3
+    corunCalcSinkermotor(co_run,line,size);
+
+    if (IS_ECONO_BEGIN_END(*step)) {
+        co_run->nextline++;
+        line->iline = co_run->nextline - 1;
+        if (co_run->istep != co_run->numofstep - 1) { //not last step
+            if (co_run->nextline == nextstep->ilinetag[size] - 1) {
+                co_run->nextline = step->ilinetag[size];
+            }
+        } else { //lastmotor step
+            co_run->nextline = step->ilinetag[size];
+        }
+    }
+}
+
 
 
 uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
@@ -978,54 +1054,30 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     }
 
     //calculate speed;
-    int16 acc;
-    if (step->speed != NULL) {
-        int32 tarrpm = step->speed->rpm;
-        uint32 ramp = step->speed->ramp[size];
-        acc = (tarrpm - (int32)co_run->prerpm) / (int32)ramp;
-        co_run->speedAcc = acc;
-        co_run->targetSpeed = tarrpm;
-    }
+    corunCalcSpeed(co_run, line, size);
+    //calculate sizemotor
+    corunCalcSizemotor(co_run, line, size);
 
-    co_run->rpm = co_run->prerpm + co_run->speedAcc;
-    if (co_run->speedAcc < 0 && co_run->rpm < co_run->targetSpeed) {
-        co_run->rpm = co_run->targetSpeed;
-    } else if (co_run->speedAcc > 0 && co_run->rpm > co_run->targetSpeed) {
-        co_run->rpm = co_run->targetSpeed;
-    }
-    if (co_run->rpm == co_run->targetSpeed) {
-        co_run->speedAcc = 0;
-    }
-
-    //calculate sizemotor;
-    if (step->sizemotor != NULL) {
-        line->zonename = step->sizemotor->descrpition;
-        line->zonebegin = step->sizemotor->head.beginStep;
-        line->zoneend = step->sizemotor->head.endStep;
-    } else {
-        line->zonename = NULL;
-    }
+    //calculate sinker motor_1_3
+    corunCalcSinkermotor(co_run,line,size);
 
     //welt;
     line->welt = co_run->welt = step->welt;
 
     //funcode
-    funcodeParse(step->func, line->act,line->alarm,&line->flag);
+    funcodeParse(step->func, line->act, line->alarm, &line->flag);
 
     //process step
     co_run->nextstep++;
-    co_run->nextline = step->ilinetag[size] + 1;
+    co_run->nextline = co_run->stepptr[co_run->nextstep]->ilinetag[size];
 
     //set line data;
-    line->rpm = co_run->rpm;
     line->econonum = co_run->econonum;
     line->iecono = co_run->iecono;
     line->econobegin = co_run->econostepfrom;
     line->econoend = co_run->econostepto;
     line->iline = co_run->nextline - 1;
     line->istep = stepindex;
-
-    //line->act = co_run->act;
 
     return co_run->numofline[size] - line->iline - 1;
 }
@@ -1061,7 +1113,7 @@ static bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
 }
 
 
-void corunReset(S_CO_RUN *co_run,uint32 size){
+void corunReset(S_CO_RUN *co_run, uint32 size) {
     corunSeekLine(co_run, 0, size);
 }
 
@@ -1218,16 +1270,16 @@ int cnParse(const TCHAR *path, S_CN_GROUP *val) {
     }
     f_close(&file);
     return re;
-ERROR:
+    ERROR:
     f_close(&file);
     return re;
 }
 
 
 static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
-                            uint16 *alarmcode,uint32 *alarmnum,uint32 *flag);
+                           uint16 *alarmcode, uint32 *alarmnum, uint32 *flag);
 
-static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve,ALARM_GROUP *angleAlarm,uint32 *flag) {
+static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve, ALARM_GROUP *angleAlarm, uint32 *flag) {
     struct list_head *p;
     for (int i = 0; i < 360; i++) {
         angleValve[i].num = 0; //cear ANGLE_VALVE::num ,  ANGLE_VALVE::inum
@@ -1239,10 +1291,10 @@ static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve,ALARM_GRO
         FUNC *fun = list_entry(p, FUNC, list);
         uint32 angle = fun->angular;
         //uint32 angle = Angle_To_Needles(fun->angular);  //change angle to needle
-        uint32 valvecodenum = 0,alarmnum = 0,flagtemp = 0;
+        uint32 valvecodenum = 0, alarmnum = 0, flagtemp = 0;
         funcodeResolve(fun, &angleValve[angle].valvecode[angleValve[angle].num], &valvecodenum,
-                            &angleAlarm[angle].alarmcode[angleAlarm[angle].num], &alarmnum,
-                            &flagtemp);
+                       &angleAlarm[angle].alarmcode[angleAlarm[angle].num], &alarmnum,
+                       &flagtemp);
         angleValve[angle].num += valvecodenum;
         angleAlarm[angle].num += alarmnum;
         *flag |= flagtemp;
@@ -1328,24 +1380,51 @@ static uint16 hafuzhencode2Valvecode(uint16 funcval) {
 }
 
 
-static uint16 caminoutmap[4][3] = { //[feed][pos]
-    { 0, 293, 113 }, { 0, 23, 203 }, { 0, 113, 293 }, { 0, 203, 23 }
-};
 
-static uint16 camcode2Valvecode(FUNC *fun) {
+
+static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
+    static uint16 caminoutmap[4][3][3] = { //[feed][stx][ace]
+        { { 0, 293, 113 }, { 0, 293, 113}, { 0, 0, 0}},
+        { { 0, 23, 203}, { 0, 23, 203}, { 0, 23, 23}},
+        { { 0, 113, 293}, { 0, 113, 293}, { 0, 0, 0}},
+        { { 0, 203, 23}, { 0, 203, 23}, { 0, 203, 23}},
+    };
+
+    bool in = false;
     uint32 pos_ace = fun->value % 3;
     uint32 sxt = fun->value / 3 % 3;
     uint32 feed = fun->value / 9;
-    uint32 code;
-    if (sxt == 1) {
-        return 0xffff;
+    if (caminoutmap[feed][sxt][pos_ace] == fun->angular) {
+        in = true;
     }
-    if (caminoutmap[feed][pos_ace] == fun->angular) {
-        code = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 3 + pos_ace;
-    } else {
-        code = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 3 + pos_ace;
+    switch (pos_ace) {
+    case 0: //A
+        if (in == false) {
+            valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan out
+            valvecode[1] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban out
+            *num = 2;
+        }
+        break;
+    case 1: //C
+        if (in == true) {
+            valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban in
+            *num = 1;
+        } else {
+            valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan out
+            *num = 1;
+        }
+        break;
+    case 2: //E
+        if (in == true) {
+            //ban in,quan in
+            valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban in
+            valvecode[1] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan in
+            *num = 2;
+        }
+        break;
+    default:
+        break;
     }
-    return code;
 }
 
 
@@ -1379,7 +1458,7 @@ static uint16 misc0203code2Valvecode(uint16 codevalue) {
     return re;
 }
 
-static uint16 funcode2Alarm(FUNC *func,uint32 *flag) {
+static uint16 funcode2Alarm(FUNC *func, uint32 *flag) {
     uint16 alarmcode = 0;
     if (func->funcode == 0x031e) {
         switch (func->value) {
@@ -1409,15 +1488,15 @@ static uint16 funcode2Alarm(FUNC *func,uint32 *flag) {
 
 
 static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
-                           uint16 *alarmcode,uint32 *alarmnum,uint32 *flag) {
+                           uint16 *alarmcode, uint32 *alarmnum, uint32 *flag) {
     //uint16 val;
     *valnum = 0;
     *alarmnum = 0;
     switch (fun->funcode) {
     case 0x031e: //sel
         if (fun->value < 0x0d) {
-            *alarmcode = funcode2Alarm(fun,flag);
-            if (*alarmcode!=0) {
+            *alarmcode = funcode2Alarm(fun, flag);
+            if (*alarmcode != 0) {
                 *alarmnum = 1;
             }
         } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
@@ -1442,11 +1521,12 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         }
         break;
     case 0x0305:  //cam
-        *valvecode = camcode2Valvecode(fun);
-        *flag |= LINE_FLAG_ACT;
-        if (*valvecode != 0xffff) {
-            *valnum = 1;
+        camcode2Valvecode(fun, valvecode, valnum);
+        if (*valnum != 0) {
+            *flag |= LINE_FLAG_ACT;
         }
+        break;
+    default:
         break;
     }
 }

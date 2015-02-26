@@ -223,9 +223,12 @@ CO_SPEED;
 
 typedef struct
 {
-    uint32 step;
-    uint32 rpm;
-    uint16 ramp[8];
+    int32 step;
+    //int32 prerpm[8];
+    //int32 acc[8];
+    int32 rpm;
+    int16 ramp[8];
+    bool coed;
     struct list_head list;
 }SPEED;
 
@@ -326,10 +329,9 @@ typedef struct
 {
     uint32 diameter;
     uint16 niddle;
-    uint32 numofspeed;
     uint32 numofstep;
     uint32 file_speedOff;
-    SPEED speed[100];
+    struct list_head speed;
     uint32 numofsizemotorzone;
     SIZEMOTOR_ZONE sizemotor[20];
     uint32 numofsinkmoterzone_1_3;
@@ -354,6 +356,7 @@ typedef struct
 typedef struct
 {
     uint32 ilinetag[8];
+    //uint32 ilineEtag[8];
     uint16 econoFlag;
     ECONOMIZER_PARAM *econo;
 
@@ -375,6 +378,7 @@ typedef struct
 #define ECONO_END     4
 #define IS_ECONO_BEGIN(A)   ((A).econoFlag & ECONO_BEGIN)
 #define IS_ECONO_END(A)   ((A).econoFlag & ECONO_END)
+#define IS_ECONO_BEGIN_END(A)  (((A).econoFlag & ECONO_END)&&((A).econoFlag & ECONO_BEGIN))
 
 
 
@@ -398,7 +402,7 @@ typedef struct __S_CO_RUN
     int32 prestep;
 
     uint16 prerpm;
-    uint16 rpm;
+    int32 rpm;
     int16 speedAcc;                 //speed acceleration when run
     uint16 targetSpeed;             //target speed when ramp
 
@@ -424,6 +428,7 @@ typedef struct __S_CO_RUN
 
 #define LINE_FLAG_F4  0x01
 #define LINE_FLAG_ACT 0x02
+
 
 typedef struct
 {
@@ -478,6 +483,7 @@ extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
 extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
+extern void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 //extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void corunReset(S_CO_RUN *co_run,uint32 size);
