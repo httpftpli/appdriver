@@ -331,6 +331,56 @@ static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, uint32 num) {
 }
 
 
+uint32 co_get_crc(uint8 buf[], uint16 dwSize)
+{
+
+    int len,i,j=0;
+	uint32 x;
+	int x1;
+	int x2;
+    uint32 aVal = 0;
+    uint32 bVal;
+    len = dwSize;
+    uint32 temp;
+
+
+    while(1)
+	{
+		x=buf[j];
+        temp = buf[1+j];
+		x+=temp<<8;
+        temp = buf[2+j];
+		x+=temp<<16;
+		temp = buf[3+j];
+		x+=temp<<24;
+
+		bVal = x;
+
+		for(i=0;i<32;i++)
+		{
+			x2 = (aVal & 0x80000000) ^ (bVal & 0x80000000);
+
+			if (x2==0x80000000)
+			{
+				aVal= aVal ^ 0x84c11db7;
+			}
+			aVal <<= 1;
+			aVal += 1;
+			bVal <<= 1;
+		}
+
+		j +=4;
+
+		if (j>=dwSize) break;
+	}
+	//x = (aVal & 0xff) << 24;
+    //x = x + ((aVal & 0xff00) << 8);
+	//x = x + ((aVal & 0xff000000) >> 24);
+	//x = x + ((aVal & 0xff0000) >> 8);
+    return aVal;
+}
+
+
 static bool coCheck(S_CO *co) {
 
     return true;
@@ -1119,7 +1169,7 @@ void corunReset(S_CO_RUN *co_run, uint32 size) {
 
 
 
-static const unsigned char cohexData[272] = {
+static const unsigned char cnhexData[272] = {
     0x00, 0x00, 0x00, 0x00, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x63, 0x6E, 0x20, 0x4c,
     0x35, 0x31, 0x30, 0x20, 0x20, 0x20, 0x20, 0x20, 0x20, 0x02, 0x05, 0x00, 0x00, 0x01, 0x00, 0x00,
     0x43, 0x4F, 0x4E, 0x43, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0xD1, 0x8D, 0x72, 0x14,
@@ -1174,7 +1224,7 @@ bool cnCreate(const TCHAR *path, S_CN_GROUP *co, uint32 num) {
     uint8 buf[512];
     char filename[13];
     memset(buf, 0, sizeof buf);
-    memcpy(buf, cohexData, sizeof cohexData);
+    memcpy(buf, cnhexData, sizeof cnhexData);
     r = f_open(&file, path, FA_CREATE_ALWAYS | FA_READ | FA_WRITE);
     if (r != FR_OK) {
         return false;
