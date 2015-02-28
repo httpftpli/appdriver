@@ -22,6 +22,28 @@
 #define VALVE_MIS_NUMBER  64
 
 
+
+typedef __packed struct {
+    uint16 unkown;
+    char name[4];
+    uint16 offset;
+    uint16 len;
+    char unkown2[17];
+    uint32 check;
+}CO_SECTION;
+
+
+typedef __packed struct {
+    uint32 coCheck;
+    char coFileName[11];
+    char machineName[11];
+    int32 softver;
+    char unkown[44];
+    CO_SECTION sec[14];
+    char unkown1[4];
+}CO_HEADER ;
+
+
 __packed typedef struct
 {
     uint16 sizet;
@@ -40,7 +62,7 @@ __packed typedef struct
     uint32 sinkerangular_Addr;
     uint32 unknow1;
 }
-CO_PART1_ATTRIB;
+CO_RESET_INFO;
 
 
 
@@ -80,7 +102,7 @@ __packed typedef struct
     uint32 speed_addr;
     char unknow2[8];
 }
-CO_PART3_ATTRIB;
+CO_CATE_INFO;
 
 
 __packed typedef struct
@@ -89,7 +111,7 @@ __packed typedef struct
     uint32 fengmen1addr;
     uint32 fengmen2addr;
 }
-CO_PART4_ATTRIB;
+CO_MPP_INFO;
 
 
 __packed typedef struct
@@ -266,6 +288,13 @@ __packed typedef struct
 MOTOR_HEADER_PARAM;
 
 
+typedef struct
+{
+    uint16 angular;
+    uint16 dummy;
+    uint16 funcode;
+    uint16 val;
+}CO_FENGMEN;
 
 
 typedef struct
@@ -301,12 +330,16 @@ typedef struct
 __packed typedef struct{
     uint32 flag;
     uint32 unkown;
-    uint32 unkown1[5];
-    uint32 size;
+    char   headmppctrl;
+    char   dummy[3];
+    uint32 unkown1[4];
+    uint32 filedescOffset;
     uint32 weltAddrOffset;
     uint32 econoAddrOffset;
-    char unkown3[24];
-}CO_ATTRIB5;
+    uint32 unkown3;
+    uint32 supesize;
+    char unkown4[16];
+}CO_SUPE_INFO;
 
 
 
@@ -327,24 +360,28 @@ typedef struct __S_CO_RUN S_CO_RUN;
 
 typedef struct
 {
+    CO_HEADER head;
     uint32 diameter;
     uint16 niddle;
     uint32 numofstep;
-    uint32 file_speedOff;
-    struct list_head speed;
+
+    CO_RESET_INFO resetinfo;
+    CO_CATE_INFO  cateinfo;
+    CO_SUPE_INFO  supeinfo;
+
     uint32 numofsizemotorzone;
-    SIZEMOTOR_ZONE sizemotor[20];
+    SIZEMOTOR_ZONE sizemotor[30];
     uint32 numofsinkmoterzone_1_3;
-    SINKERMOTOR_ZONE sinkmoterzone_1_3[20];
+    SINKERMOTOR_ZONE sinkmoterzone_1_3[30];
     uint32 numofsinkmoterzone_2_4;
-    SINKERMOTOR_ZONE sinkmoterzone_2_4[20];
+    SINKERMOTOR_ZONE sinkmoterzone_2_4[30];
     uint32 numofsinkangular;
-    SINKERMOTOR_ZONE sinkangular[20];
+    SINKERMOTOR_ZONE sinkangular[30];
     MOTOR_HEADER_PARAM motor_header[12];
+    struct list_head speed;
     struct list_head func[500];
     struct list_head fengmen[500];
     struct list_head welt;
-    uint32 file_econoOff;
     uint32 numofeconomizer;
     ECONOMIZER_PARAM econo[200];
     S_CO_RUN *run;
@@ -478,7 +515,8 @@ CN_GROUP;
 //================================================================================
 extern void coInit();
 extern bool coMd5(const TCHAR *path,void *md5,int md5len);
-extern bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset);
+extern int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset);
+extern int32 coSave(S_CO *co, TCHAR *path);
 extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
@@ -486,7 +524,7 @@ extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
 //extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
-extern void corunReset(S_CO_RUN *co_run,uint32 size);
+extern void corunReset(S_CO_RUN *co_run);
 extern void coRelease(S_CO *co);
 
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co,unsigned int num);

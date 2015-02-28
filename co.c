@@ -25,6 +25,8 @@ static struct list_head runstepfreelist;
 static WELT_PARAM __welt_param_pool[20];
 static struct list_head welt_param_freelist;
 
+static unsigned char cofilebuf[1024 * 2048];
+
 //static ACT_GROUP act360[360];
 
 //static ALARM_GROUP alarm360[360];
@@ -79,189 +81,133 @@ void coInit() {
 }
 
 
-static bool readSinkMotor(FIL *file, SINKERMOTOR_ZONE *zone, unsigned int *num) {
+static void readSinkMotor(void *sinkmotorbuf, SINKERMOTOR_ZONE *zone, unsigned int *num) {
     *num = 0;
-    while (1) {
-        CO_SINKERMOTOR_ZONE co_zone;
-        uint32 br;
-        FRESULT r = f_read(file, &co_zone, sizeof co_zone,&br);
-        if (r != FR_OK || br != sizeof co_zone) {
-            //re = CO_FILE_READ_ERROR;
-            return false;
-        }
-        if (co_zone.size != 0) {
+    for (int i = 0;; i++) {
+        CO_SINKERMOTOR_ZONE *co_zone = (CO_SINKERMOTOR_ZONE *)sinkmotorbuf + i;
+        if (co_zone->size != 0) {
             SINKERMOTOR_ZONE *zonetemp = zone + *num;
 
-            memcpy(&zonetemp->descrpition, &co_zone.descrpition, sizeof zonetemp->descrpition);
+            memcpy(&zonetemp->descrpition, &co_zone->descrpition, sizeof zonetemp->descrpition);
 
-            zonetemp->head.angle = co_zone.head.angle;
-            zonetemp->head.beginStep = co_zone.head.beginStep;
-            zonetemp->head.endStep = co_zone.head.endStep;
-            zonetemp->head.groupNum = co_zone.head.groupNum;
+            zonetemp->head.angle = co_zone->head.angle;
+            zonetemp->head.beginStep = co_zone->head.beginStep;
+            zonetemp->head.endStep = co_zone->head.endStep;
+            zonetemp->head.groupNum = co_zone->head.groupNum;
 
             for (int i = 0; i < 8; i++) {
-                zonetemp->param[i].qf_feed = co_zone.param[i].qf_feed[0] * 1000;
-                zonetemp->param[i].qi_feed = co_zone.param[i].qi_feed[0] * 1000;
+                zonetemp->param[i].qf_feed = co_zone->param[i].qf_feed[0] * 1000;
+                zonetemp->param[i].qi_feed = co_zone->param[i].qi_feed[0] * 1000;
             }
             (*num)++;
         } else {
-            f_lseek(file, f_tell(file) - sizeof co_zone + 4); //back filepoint
             break;
             //TODO: numof sizemotor zone protect
         }
     }
-    return true;
 }
 
 
 
-static bool readSizemotor(FIL *file, SIZEMOTOR_ZONE *zone, unsigned int *num) {
+static void readSizemotor(uint8 *sizemotorbuf, SIZEMOTOR_ZONE *zone, unsigned int *num) {
     *num = 0;
-    while (1) {
-        CO_SIZEMOTOR_ZONE co_szone;
-        uint32 br;
-        FRESULT r = f_read(file, &co_szone, sizeof co_szone,&br);
-        if (r != FR_OK || br != sizeof co_szone) {
-            //re = CO_FILE_READ_ERROR;
-            return false;
-        }
-        if (co_szone.size != 0) {
+    for (int i = 0;; i++) {
+        CO_SIZEMOTOR_ZONE *co_szone = (CO_SIZEMOTOR_ZONE *)sizemotorbuf + i;
+        if (co_szone->size != 0) {
             SIZEMOTOR_ZONE *zone_temp = zone + *num;
-            memcpy(&zone_temp->descrpition, &co_szone.descrpition, sizeof zone->descrpition);
+            memcpy(&zone_temp->descrpition, &co_szone->descrpition, sizeof zone->descrpition);
 
-            zone_temp->head.angle = co_szone.head.angle;
-            zone_temp->head.beginStep = co_szone.head.beginStep;
-            zone_temp->head.endStep = co_szone.head.endStep;
-            zone_temp->head.groupNum = co_szone.head.groupNum;
+            zone_temp->head.angle = co_szone->head.angle;
+            zone_temp->head.beginStep = co_szone->head.beginStep;
+            zone_temp->head.endStep = co_szone->head.endStep;
+            zone_temp->head.groupNum = co_szone->head.groupNum;
 
             for (int i = 0; i < 8; i++) {
-                zone_temp->param[i].start = co_szone.param[i].start[0] * 1000;
-                zone_temp->param[i].startWidth = co_szone.param[i].startWidth;
-                zone_temp->param[i].startWidthDec = co_szone.param[i].startWidthDec;
-                zone_temp->param[i].end = co_szone.param[i].end[0] * 1000;
-                zone_temp->param[i].endWidth = co_szone.param[i].endWidth;
-                zone_temp->param[i].endWidthDec = co_szone.param[i].endWidthDec;
+                zone_temp->param[i].start = co_szone->param[i].start[0] * 1000;
+                zone_temp->param[i].startWidth = co_szone->param[i].startWidth;
+                zone_temp->param[i].startWidthDec = co_szone->param[i].startWidthDec;
+                zone_temp->param[i].end = co_szone->param[i].end[0] * 1000;
+                zone_temp->param[i].endWidth = co_szone->param[i].endWidth;
+                zone_temp->param[i].endWidthDec = co_szone->param[i].endWidthDec;
             }
             (*num)++;
         } else {
-            f_lseek(file, f_tell(file) - sizeof co_szone + 4); //back filepoint
             break;
             //TODO: numof sizemotor zone protect
         }
     }
-    return true;
 }
 
 
-static bool readSpeed(FIL *file, struct list_head *speed) {
-    while (1) {
-        CO_SPEED co_speed;
-        uint32 br;
-        FRESULT r = f_read(file, &co_speed, sizeof co_speed,&br);
-        if (r != FR_OK || br != sizeof co_speed) {
-            //re = CO_FILE_READ_ERROR;
-            return false;
-        }
-        if (co_speed.step != 0xffffffff) {
+static void readSpeed(uint8 *speedbuf, struct list_head *speed) {
+    for (int i = 0;; i++) {
+        CO_SPEED *co_speed = (CO_SPEED *)speedbuf + i;
+        if (co_speed->step != 0xffffffff) {
             SPEED *speedtemp = list_first_entry(&speedfreelist, SPEED, list);
-            memcpy(speedtemp->ramp, co_speed.ramp, sizeof speedtemp->ramp);
-            speedtemp->rpm = co_speed.rpm[0];
-            speedtemp->step = co_speed.step;
+            memcpy(speedtemp->ramp, co_speed->ramp, sizeof speedtemp->ramp);
+            ASSERT(co_speed->rpm[0]==co_speed->rpm[1]);
+            speedtemp->rpm = co_speed->rpm[0];
+            speedtemp->step = co_speed->step;
             speedtemp->coed = true;
             list_move_tail(&speedtemp->list, speed);
         } else {
-            f_lseek(file, f_tell(file) - sizeof co_speed + 4); //back filepoint
             break;
             //TODO: numof SPEED protect
         }
     }
-    return true;
 }
 
 
-bool readFunc(FIL *file, struct list_head *funclist, unsigned int *step) {
-    *step = 0;
-    unsigned fileoffset = f_tell(file);
-    unsigned int size, br;
-    FRESULT r = f_read(file, &size, sizeof size,&br);
-    if (r != FR_OK || br != sizeof size) {
-        //re = CO_FILE_READ_ERROR;
-        return false;
-    }
-    *step = size / 4;
+void readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
+    *step = *(uint32 *)funcaddr / 4;
     for (int i = 0; i < *step; i++) {
-        unsigned int addr;
-        //read addr
-        f_lseek(file, fileoffset + i * 4);
-        r = f_read(file, &addr, 4, &br);
-        if (r != FR_OK || br != 4) {
-            //re = CO_FILE_READ_ERROR;
-            return false;
-        }
-        addr += fileoffset;
-        f_lseek(file, addr);
+        unsigned int addr = ((uint32 *)funcaddr)[i];
         //read func;
-        CO_FUNC cofunc;
         while (1) {
-            FUNC *func = list_entry(funcfreelist.next, FUNC, list);
-            r = f_read(file, &cofunc, 2, &br);
-            if (cofunc.angular != 0x8000) {
-                r = f_read(file, &cofunc.value, 4, &br);
-                if (cofunc.funcode == 0x031f) {
-                    r = f_read(file, &cofunc.add, 4, &br);
-                } else if (cofunc.funcode == 0x030b) {
-                    r = f_read(file, &cofunc.add, 2, &br);
+            FUNC *func = list_first_entry(&funcfreelist, FUNC, list);
+            CO_FUNC *cofunc = (CO_FUNC *)(funcaddr + addr);
+            if (cofunc->angular != 0x8000) {
+                ASSERT(cofunc->angular < 360);
+                addr += 6;
+                if (cofunc->funcode == 0x031f) {
+                    addr += 4;
+                } else if (cofunc->funcode == 0x030b) {
+                    addr += 2;
                 }
-                func->angular = cofunc.angular;
-                func->value = cofunc.value;
-                func->funcode = cofunc.funcode;
-                func->funcode = cofunc.funcode;
-                *(uint32 *)func->add = *(uint32 *)cofunc.add;
+                func->angular = cofunc->angular;
+                func->value = cofunc->value;
+                func->funcode = cofunc->funcode;
+                func->funcode = cofunc->funcode;
+                *(uint32 *)func->add = *(uint32 *)cofunc->add;
                 list_move_tail(&func->list, &funclist[i]);
             } else {
                 break;
             }
         }
     }
-    return true;
 }
 
 
-static bool readFengmen(FIL *file, struct list_head *fengmenlist, unsigned int *step) {
-    *step = 0;
-    unsigned fileoffset = f_tell(file);
-    unsigned int size, br;
-    FRESULT r = f_read(file, &size, sizeof size,&br);
-    if (r != FR_OK || br != sizeof size) {
-        //re = CO_FILE_READ_ERROR;
-        return false;
-    }
-    *step = size / 4;
+static void readFengmen(uint8 *fengmenbuf, struct list_head *fengmenlist, unsigned int *step) {
+    *step = *(uint32 *)fengmenbuf / 4;
     for (int i = 0; i < *step; i++) {
-        unsigned int addr;
-        //read addr
-        f_lseek(file, fileoffset + i * 4);
-        r = f_read(file, &addr, 4, &br);
-        if (r != FR_OK || br != 4) {
-            //re = CO_FILE_READ_ERROR;
-            return false;
-        }
-        addr += fileoffset;
-        f_lseek(file, addr);
-        //read func;
         FENGMEN *fengmen;
+        CO_FENGMEN *fengmentemp = (CO_FENGMEN *)(fengmenbuf + *((uint32 *)fengmenbuf + i));
         while (1) {
-            fengmen = list_entry(fengmenfreelist.next, FENGMEN, list);
-            r = f_read(file, fengmen, 2, &br);
-            if (fengmen->angular != 0x8000) {
-                r = f_read(file, &fengmen->dummy, sizeof(FENGMEN) - 2 - sizeof(struct list_head), &br);
+            fengmen = list_first_entry(&fengmenfreelist, FENGMEN, list);
+            if (fengmentemp->angular != 0x8000) {
+                ASSERT(fengmentemp->angular < 360);
+                fengmen->angular = fengmentemp->angular;
+                fengmen->dummy = fengmentemp->dummy;
+                fengmen->funcode = fengmentemp->funcode;
+                fengmen->val = fengmentemp->val;
                 list_move_tail(&fengmen->list, &fengmenlist[i]);
+                fengmentemp++;
             } else {
                 break;
             }
         }
     }
-    return true;
 }
 
 
@@ -279,112 +225,179 @@ static bool readMotorHeader(FIL *file, MOTOR_HEADER_PARAM *motor, unsigned int n
 }
 
 
-static bool readWelt(FIL *file, struct list_head *weltListHead, uint32 num) {
-    CO_WELT_PARAM co_welt;
-    uint32 br;
-    for (int i = 0; i < num; i++) {
-        FRESULT r = f_read(file, &co_welt, sizeof co_welt ,&br);
-        if (r != FR_OK || br != sizeof co_welt) {
-            return false;
-        }
-        ASSERT(co_welt.weltflag == 0x2042 || co_welt.weltflag == 0x2062);
+static void readWelt(uint8 *weltbuf, struct list_head *weltListHead) {
+    CO_WELT_PARAM *co_welt;
+    for (int i = 0;; i++) {
+        co_welt = (CO_WELT_PARAM *)weltbuf + i;
+        ASSERT(co_welt->weltflag == 0x2042 || co_welt->weltflag == 0x2062
+               || co_welt->weltflag == 0x00);
         WELT_PARAM *welt;
-        if (co_welt.weltflag == 0x2042) { //welt in
+        if (co_welt->weltflag == 0x2042) { //welt in
             welt = list_entry(welt_param_freelist.next, WELT_PARAM, list);
-            welt->weltinstep = co_welt.step;
+            welt->weltinstep = co_welt->step;
             list_move_tail(welt_param_freelist.next, weltListHead);
-        } else if (co_welt.weltflag == 0x2062) { //welt out
-            welt->weltoutstep = co_welt.step - 1;
+        } else if (co_welt->weltflag == 0x2062) { //welt out
+            welt->weltoutstep = co_welt->step - 1;
+        } else if (co_welt->weltflag == 0x00) {
+            break;
         }
     }
-    //end flag 4byte should be 0
-    uint32 temp;
-    FRESULT r = f_read(file, &temp, 4, &br);
-    if (r != FR_OK || br != 4 || temp != 0) {
-        return false;
-    }
-    return true;
 }
 
-static bool readEconomizer(FIL *file, ECONOMIZER_PARAM *econo, uint32 num) {
-    CO_ECONOMIZER_PARAM param;
-    uint32 br;
-    FRESULT r;
-    for (int i = 0; i < num; i++) {
-        r = f_read(file, &param, sizeof param ,&br);
-        if (r != FR_OK || br != sizeof param) {
-            return false;
+
+static void readEconomizer(uint8 *econobuf, ECONOMIZER_PARAM *econo, uint32 *num) {
+    *num = 0;
+    CO_ECONOMIZER_PARAM *param;
+    for (int i = 0;; i++) {
+        param = (CO_ECONOMIZER_PARAM *)econobuf + i;
+        if (param->begin == 0 && param->end == 0
+            && param->economize[0][0] != param->economize[0][1]) {
+            break;
         }
-        econo[i].begin = param.begin;
-        econo[i].end = param.end;
+        econo[i].begin = param->begin;
+        econo[i].end = param->end;
         for (int j = 0; j < 8; j++) {
-            econo[i].economize[j] = param.economize[j][0];
+            econo[i].economize[j] = param->economize[j][0];
         }
+        num++;
     }
-    //read end 4 byte ,should be 0x00;
-    uint32 numtemp;
-    r = f_read(file, &numtemp, 4, &br);
-    if (r != FR_OK || br != 4 || numtemp != 0) {
+}
+
+static void co_read_reset(S_CO *co, uint8 resetpartbuf[]) {
+    CO_RESET_INFO *info = (CO_RESET_INFO *)resetpartbuf;
+
+    memcpy(&co->resetinfo,info,sizeof *info);
+
+    co->diameter = info->diameter;
+    co->niddle = info->niddle;
+
+    //read sizemoter;
+    readSizemotor(resetpartbuf + info->sizemotorAddr, co->sizemotor,
+                  &co->numofsizemotorzone);
+
+    //read sinkermotor_feed1_3;
+    readSinkMotor(resetpartbuf + info->sinkermotor_feed1_3_Addr,
+                  co->sinkmoterzone_1_3, &co->numofsinkmoterzone_1_3);
+
+    //read sinkermotor_feed2_4;
+    readSinkMotor(resetpartbuf + info->sinkermotor_feed2_4_Addr,
+                  co->sinkmoterzone_2_4, &co->numofsinkmoterzone_2_4);
+
+    //read sinkerangular;
+    readSinkMotor(resetpartbuf + info->sinkerangular_Addr,
+                  co->sinkangular, &co->numofsinkangular);
+
+}
+
+
+static void co_read_yarn(S_CO *co, uint8 yarnpartbuf[]) {
+    /*CO_PART2_ATTRIB *coattri2 = (CO_PART2_ATTRIB *)buf;
+    r = f_read(&file, coattri2, sizeof*coattri2,&br);
+    if (r != FR_OK || br != sizeof*coattri2) {
+        //re = CO_FILE_READ_ERROR;
+        goto ERROR;
+    }
+    coattri2->unkownaddr[11] += coPart2Offset;
+    f_lseek(&file, coattri2->unkownaddr[11]);
+    uint32 lastmotor;
+    r = f_read(&file, &lastmotor, sizeof lastmotor,&br);
+    if (r != FR_OK || br != 4) {
+        //re = CO_FILE_READ_ERROR;
+        goto ERROR;
+    }
+    if (lastmotor != 0) {
+        goto ERROR;
+    }
+    //read MOTOR_HEADER_GROUP
+    if (ver == '6') {
+        if (!readMotorHeader(&file, co->motor_header, 12)) {
+            goto ERROR;
+        }
+    }*/
+}
+
+static void co_read_cate(S_CO *co, uint8 catepartbuf[]) {
+    CO_CATE_INFO *info = (CO_CATE_INFO *)catepartbuf;
+
+    memcpy(&co->cateinfo,info,sizeof *info);
+
+    readSpeed(catepartbuf + info->speed_addr, &co->speed);
+
+    unsigned int step;
+    readFunc(catepartbuf + info->func_addr, co->func, &step);
+    co->numofstep = step;
+}
+
+static bool co_read_mpp(S_CO *co, uint8 mpppartbuf[]) {
+    CO_MPP_INFO *mppinfo = (CO_MPP_INFO *)mpppartbuf;
+    uint32 step;
+    readFengmen(mpppartbuf + mppinfo->fengmen1addr, co->fengmen, &step);
+    if (step != co->numofstep) {
         return false;
     }
     return true;
 }
 
 
-uint32 co_get_crc(uint8 buf[], uint16 dwSize)
-{
+static void co_read_supe(S_CO *co, uint8 supepartbuf[]) {
+    CO_SUPE_INFO *supeinfo = (CO_SUPE_INFO *)supepartbuf;
 
-    int len,i,j=0;
-	uint32 x;
-	int x1;
-	int x2;
+    memcpy(&co->supeinfo,supeinfo,sizeof *supeinfo);
+
+//read welt;
+    readWelt(supepartbuf + supeinfo->weltAddrOffset, &co->welt);
+
+//read economizers
+    readEconomizer(supepartbuf + supeinfo->econoAddrOffset, co->econo, &co->numofeconomizer);
+}
+
+
+
+
+uint32 co_get_crc(uint8 buf[], uint16 dwSize) {
+
+    int i, j = 0;
+    uint32 x;
+    int x2;
     uint32 aVal = 0;
     uint32 bVal;
-    len = dwSize;
+    //uint32 len = dwSize;
     uint32 temp;
 
 
-    while(1)
-	{
-		x=buf[j];
-        temp = buf[1+j];
-		x+=temp<<8;
-        temp = buf[2+j];
-		x+=temp<<16;
-		temp = buf[3+j];
-		x+=temp<<24;
+    while (1) {
+        x = buf[j];
+        temp = buf[1 + j];
+        x += temp << 8;
+        temp = buf[2 + j];
+        x += temp << 16;
+        temp = buf[3 + j];
+        x += temp << 24;
 
-		bVal = x;
+        bVal = x;
 
-		for(i=0;i<32;i++)
-		{
-			x2 = (aVal & 0x80000000) ^ (bVal & 0x80000000);
+        for (i = 0; i < 32; i++) {
+            x2 = (aVal & 0x80000000) ^ (bVal & 0x80000000);
 
-			if (x2==0x80000000)
-			{
-				aVal= aVal ^ 0x84c11db7;
-			}
-			aVal <<= 1;
-			aVal += 1;
-			bVal <<= 1;
-		}
+            if (x2 == 0x80000000) {
+                aVal = aVal ^ 0x84c11db7;
+            }
+            aVal <<= 1;
+            aVal += 1;
+            bVal <<= 1;
+        }
 
-		j +=4;
+        j += 4;
 
-		if (j>=dwSize) break;
-	}
-	//x = (aVal & 0xff) << 24;
+        if (j >= dwSize) break;
+    }
+    //x = (aVal & 0xff) << 24;
     //x = x + ((aVal & 0xff00) << 8);
-	//x = x + ((aVal & 0xff000000) >> 24);
-	//x = x + ((aVal & 0xff0000) >> 8);
+    //x = x + ((aVal & 0xff000000) >> 24);
+    //x = x + ((aVal & 0xff0000) >> 8);
     return aVal;
 }
 
-
-static bool coCheck(S_CO *co) {
-
-    return true;
-}
 
 
 bool coMd5(const TCHAR *path, void *md5, int md5len) {
@@ -412,10 +425,14 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 }
 
 
-bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
+
+#define CO_FILE_READ_ERROR  -1
+#define CO_FILE_CHECK_ERROR -2
+
+int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
     unsigned int br;
-
+    int32 re = 0;
 
     //do co struct init
     for (int i = 0; i < lenthof(co->func); i++) {
@@ -430,188 +447,107 @@ bool coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     //open co file
     FRESULT r = f_open(&file, path, FA_READ);
     if (r != FR_OK) {
-        //re = CO_FILE_OPEN_ERROR;
+        re = CO_FILE_READ_ERROR;
         return false;
     }
-    unsigned char buf[512];
 
-    r = f_read(&file, buf, 512, &br);
-    if (r != FR_OK || br != 512) {
-        //re = CO_FILE_READ_ERROR;
+    //READ CO HEAD
+    r = f_read(&file, &co->head, sizeof(CO_HEADER), &br);
+    if (r != FR_OK || br != sizeof(CO_HEADER)) {
+        re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    unsigned char ver = buf[28];
-
-
-    CO_PART1_ATTRIB *coattri1 = (CO_PART1_ATTRIB *)buf;
-    r = f_read(&file, coattri1, sizeof*coattri1,&br);
-    if (r != FR_OK || br != sizeof*coattri1) {
-        //re = CO_FILE_READ_ERROR;
+    //unsigned char ver = buf[28];
+    if (co->head.coCheck != co_get_crc((uint8 *)&co->head + 4, sizeof(CO_HEADER) - 4)) {
+        re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
 
-    co->diameter = coattri1->diameter;
-    co->niddle = coattri1->niddle;
-
-    //justify address ;
-    coattri1->sizemotorAddr += 512;
-    coattri1->sinkermotor_feed1_3_Addr += 512;
-    coattri1->stitch1Addr += 512;
-    coattri1->stitch2Addr += 512;
-    coattri1->stitch3Addr += 512;
-    coattri1->stitch4Addr += 512;
-    coattri1->sinkermotor_feed2_4_Addr += 512;
-    coattri1->sinkerangular_Addr += 512;
-    //read sizemoter;
-    f_lseek(&file, coattri1->sizemotorAddr);
-    readSizemotor(&file, co->sizemotor, &co->numofsizemotorzone);
-
-    //read sinkermotor_feed1_3;
-    f_lseek(&file, coattri1->sinkermotor_feed1_3_Addr);
-    if (!readSinkMotor(&file, co->sinkmoterzone_1_3, &co->numofsinkmoterzone_1_3)) {
+    //READ CO RESET SECTION(section0)
+    f_lseek(&file, co->head.sec[0].offset << 8);
+    r = f_read(&file, &cofilebuf, co->head.sec[0].len << 8, &br);
+    if (r != FR_OK || br != co->head.sec[0].len << 8) {
+        re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    //read sinkermotor_feed2_4;
-    f_lseek(&file, coattri1->sinkermotor_feed2_4_Addr);
-    if (!readSinkMotor(&file, co->sinkmoterzone_2_4, &co->numofsinkmoterzone_2_4)) {
+    if (co->head.sec[0].check != co_get_crc(cofilebuf, co->head.sec[0].len << 8)) {
+        re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
+    co_read_reset(co, cofilebuf);
 
-    //read sinkerangular;
-    f_lseek(&file, coattri1->sinkerangular_Addr);
-    if (!readSinkMotor(&file, co->sinkangular, &co->numofsinkangular)) {
+    //READ CO YARN SECTION(section 1)
+    f_lseek(&file, co->head.sec[1].offset << 8);
+    r = f_read(&file, &cofilebuf, co->head.sec[1].len << 8, &br);
+    if (r != FR_OK || br != co->head.sec[1].len << 8) {
+        re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-
-
-    //512 aligne
-    uint32 coPart2Offset = BOUNDUP(512 + coattri1->co_size, 256);
-    f_lseek(&file, coPart2Offset);
-    //read part2 of CO ,including chain;
-
-    CO_PART2_ATTRIB *coattri2 = (CO_PART2_ATTRIB *)buf;
-    r = f_read(&file, coattri2, sizeof*coattri2,&br);
-    if (r != FR_OK || br != sizeof*coattri2) {
-        //re = CO_FILE_READ_ERROR;
+    if (co->head.sec[1].check != co_get_crc(cofilebuf, co->head.sec[1].len << 8)) {
+        re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-    coattri2->unkownaddr[11] += coPart2Offset;
-    f_lseek(&file, coattri2->unkownaddr[11]);
-    uint32 lastmotor;
-    r = f_read(&file, &lastmotor, sizeof lastmotor,&br);
-    if (r != FR_OK || br != 4) {
-        //re = CO_FILE_READ_ERROR;
+    co_read_yarn(co, cofilebuf);
+
+    //READ CO CATE SECTION(section 2)
+    f_lseek(&file, co->head.sec[2].offset << 8);
+    r = f_read(&file, &cofilebuf, co->head.sec[2].len << 8, &br);
+    if (r != FR_OK || br != co->head.sec[2].len << 8) {
+        re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (lastmotor != 0) {
+    if (co->head.sec[2].check != co_get_crc(cofilebuf, co->head.sec[2].len << 8)) {
+        re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
+    co_read_cate(co, cofilebuf);
 
-    //read MOTOR_HEADER_GROUP
-    if (ver == '6') {
-        if (!readMotorHeader(&file, co->motor_header, 12)) {
-            goto ERROR;
-        }
+    //READ CO MPP SECTION(section 3)
+    f_lseek(&file, co->head.sec[3].offset << 8);
+    r = f_read(&file, &cofilebuf, co->head.sec[3].len << 8, &br);
+    if (r != FR_OK || br != co->head.sec[3].len << 8) {
+        re = CO_FILE_READ_ERROR;
+        goto ERROR;
     }
-
-//read part 3 of co
-    uint32 coPart3Offset = BOUNDUP(f_tell(&file), 256);
-    f_lseek(&file, coPart3Offset);
-    CO_PART3_ATTRIB *coattri3 = (CO_PART3_ATTRIB *)buf;
-    r = f_read(&file, coattri3, sizeof*coattri3,&br);
-    if (r != FR_OK || br != sizeof*coattri3) {
-        //re = CO_FILE_READ_ERROR;
+    if (co->head.sec[3].check != co_get_crc(cofilebuf, co->head.sec[3].len << 8)) {
+        re = CO_FILE_CHECK_ERROR;
+        goto ERROR;
+    }
+    if (!co_read_mpp(co, cofilebuf)) {
+        re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
 
-    coattri3->speed_addr += coPart3Offset;
-    coattri3->func_addr += coPart3Offset;
-    co->file_speedOff = coattri3->func_addr;
-    f_lseek(&file, coattri3->speed_addr);
-    if (!readSpeed(&file, &co->speed)) {
+    //READ CO SUPE SECTION(section 7)
+    f_lseek(&file, co->head.sec[7].offset << 8);
+    r = f_read(&file, &cofilebuf, co->head.sec[7].len << 8, &br);
+    if (r != FR_OK || br != co->head.sec[7].len << 8) {
+        re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-
-//read funcode;
-    f_lseek(&file, coattri3->func_addr);
-    unsigned int step;
-    readFunc(&file, co->func, &step);
-    co->numofstep = step;
-
-//read part 4 of co
-    unsigned int coPart4Offset = BOUNDUP(f_tell(&file), 256);
-    CO_PART4_ATTRIB *coattri4 = (CO_PART4_ATTRIB *)buf;
-    f_lseek(&file, coPart4Offset);
-    r = f_read(&file, coattri4, sizeof*coattri4,&br);
-    if (r != FR_OK || br != sizeof*coattri4) {
-        //re = CO_FILE_READ_ERROR;
+    if (co->head.sec[7].check != co_get_crc(cofilebuf, co->head.sec[7].len << 8)) {
+        re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-
-//read fengmen
-    coattri4->fengmen2addr += coPart4Offset;
-    coattri4->fengmen1addr += coPart4Offset;
-    f_lseek(&file, coattri4->fengmen2addr);
-    if (!readFengmen(&file, co->fengmen, &step) || step != co->numofstep) {
-        goto ERROR;
-    }
-    f_lseek(&file, coattri4->fengmen1addr * 2 - coattri4->fengmen2addr);
-
-    //skip 2 unknow block
-    unsigned int unknowOffset = BOUNDUP(f_tell(&file), 256);
-    f_lseek(&file, unknowOffset);
-
-    uint32 unknow1;
-    while (1) {
-        r = f_read(&file, &unknow1, 4, &br);
-        if (r != FR_OK || br != 4) {
-            goto ERROR;
-        }
-        if (unknow1 != 0xff) {
-            f_lseek(&file, f_tell(&file) + 256 - 4);
-        } else {
-            break;
-        }
-    }
-
-    f_lseek(&file, f_tell(&file) - 4);
-
-    //read co_part5
-    CO_ATTRIB5 co_attib5;
-    r = f_read(&file, &co_attib5, sizeof co_attib5 ,&br);
-    if (r != FR_OK || br != sizeof co_attib5) {
-        goto ERROR;
-    }
-    //read welt;
-    if (!readWelt(&file, &co->welt,
-                  (co_attib5.econoAddrOffset - co_attib5.weltAddrOffset) / sizeof(CO_WELT_PARAM))) {
-        goto ERROR;
-    }
-    //read economizers
-    co->numofeconomizer = (co_attib5.size - co_attib5.econoAddrOffset) / sizeof(CO_ECONOMIZER_PARAM);
-    if (!readEconomizer(&file, co->econo, co->numofeconomizer)) {
-        goto ERROR;
-    }
+    co_read_supe(co, cofilebuf);
 
     f_close(&file);
-    if (!coCheck(co)) return false;
-    return true;
+    return re;
 
     ERROR:
     *offset = (uint32)f_tell(&file);
     f_close(&file);
-    return false;
+    return re;
 }
 
 
 void coRelease(S_CO *co) {
     struct list_head *p,*n;
-
-
     list_for_each_safe(p, n, &co->speed) {
-        //SPEED *speed = list_entry(p, SPEED, list);
-        //memset(func, 0, sizeof(FUNC) - sizeof(func->list)); //clear func but list member
-        list_move(p, &speedfreelist);
+        SPEED *speed = list_entry(p, SPEED, list);
+        list_del(p);
+        memset(speed, 0, sizeof(SPEED));
+        list_add(p, &speedfreelist);
     }
 
 
@@ -619,24 +555,27 @@ void coRelease(S_CO *co) {
     for (int i = 0; i < lenthof(co->func); i++) {
         list_for_each_safe(p, n, &co->func[i]) {
             func = list_entry(p, FUNC, list);
-            memset(func, 0, sizeof(FUNC) - sizeof(func->list)); //clear func but list member
-            list_move(p, &funcfreelist);
+            list_del(p);
+            memset(func, 0, sizeof(FUNC));
+            list_add(p, &funcfreelist);
         }
     }
     FENGMEN *fengmen;
     for (int i = 0; i < lenthof(co->fengmen); i++) {
         list_for_each_safe(p, n, &co->fengmen[i]) {
             fengmen = list_entry(p, FENGMEN, list);
-            memset(fengmen, 0, sizeof(FENGMEN) - sizeof(fengmen->list)); //clear fenmen but list member
-            list_move(p, &fengmenfreelist);
+            list_del(p);
+            memset(fengmen, 0, sizeof(FENGMEN));
+            list_add(p, &fengmenfreelist);
         }
     }
     //release welt
     WELT_PARAM *welt;
     list_for_each_safe(p, n, &co->welt) {
         welt = list_entry(p, WELT_PARAM, list);
-        memset(welt, 0, sizeof(WELT_PARAM) - sizeof(welt->list)); //clear welt param but list member
-        list_move(p, &welt_param_freelist);
+        list_del(p);
+        memset(welt, 0, sizeof(WELT_PARAM));
+        list_add(p, &welt_param_freelist);
     }
 
     //release CO_RUN
@@ -652,6 +591,72 @@ void coRelease(S_CO *co) {
         memset(run, 0, sizeof*run);
     }
     memset(co, 0, sizeof*co);
+}
+
+
+int32 coSave(S_CO *co, TCHAR *path){
+
+#if 0
+    //open co file
+    int32 re = 0;
+    FRESULT r = f_open(&file, path, FA_WRITE | FA_READ);
+    if (r != FR_OK) {
+        re = CO_FILE_WRITE_ERROR;
+        return re;
+    }
+
+    f_read(&file,cofilebuf,f_size(&file));
+
+    if (memcpy(cofilebuf,co->head,sizeof co->head)) {
+        re = CO_FILE_WRITE_DIFFILE ;
+    }
+    struct list_head *p;
+    //speed
+    list_for_each(p,&co->speed){
+        SPEED *speed = list_entry(n,SPEED,list);
+        CO_SPEED cospeed;
+        cospeed.step = speed->step;
+        cospeed.rpm[0] = cospeed.rpm[1] = speed->rpm;
+        for (int i=0;i<8;i++) {
+             cospeed.ramp[i][0] = cospeed.ramp[i][1] = speed->ramp[i];
+        }
+        uint32 wr;
+        r = f_write(&file,cospeed,sizeof *cospeed,&wr);
+        if (r != FR_OK && wr!=sizeof *cospeed) {
+            re = CO_FILE_READ_ERROR;
+            return false;
+        }
+    }
+    //sizemotor
+    f_lseek(&file,co->head.sec[0].offset+co->resetinfo.sizemotorAddr);
+    list_for_each(p,&co->speed){
+        SPEED *speed = list_entry(n,SPEED,list);
+        CO_SPEED cospeed,*cospeedwr;
+        cospeed.step = speed->step;
+        cospeed.rpm[0] = cospeed.rpm[1] = speed->rpm;
+        for (int i=0;i<8;i++) {
+             cospeed.ramp[i][0] = cospeed.ramp[i][1] = speed->ramp[i];
+        }
+        uint32 wr;
+        r = f_write(&file,cospeed,sizeof *cospeed,&wr);
+        if (r != FR_OK && wr!=sizeof *cospeed) {
+            re = CO_FILE_READ_ERROR;
+            return false;
+        }
+    }
+
+    //sinkermotor
+
+    //sinkermotor2-4
+
+    //sinkermotor angle
+
+    //economizer
+
+    //recalulate check data
+
+#endif
+
 }
 
 
@@ -875,25 +880,12 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
 
     co_run->numofstep = co->numofstep;
     co->run = co_run;
-    co->run->istep = 0;
-    co_run->speedAcc = 0;
     co_run->co = co;
-    co_run->iecono = 0;
-    co_run->econonum = 0;
-    co_run->econostepfrom = 0;
-    co_run->econostepto = 0;
-    co_run->nextline = 0;
-    co_run->prerpm = 0;
-    co_run->rpm = 0;
-
-    //co_run->act = act360;
-    //co_run->alarm = alarm360;
+  //reset co_run
+    corunReset(co_run);
 }
 
 
-/*static inline unsigned int Angle_To_Needles(unsigned int angle) {
-    return(angle * 400) / 360;
-} */
 
 
 static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve, ALARM_GROUP *angleAlarm, uint32 *flag);
@@ -992,7 +984,7 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    corunCalcSinkermotor(co_run,line,size);
+    corunCalcSinkermotor(co_run, line, size);
 
     //calculate sinker motor_2_4
     SINKERMOTOR_ZONE *sinkermotor_zone_2_4 = step->sinkmoterzone_2_4;
@@ -1077,7 +1069,7 @@ void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    corunCalcSinkermotor(co_run,line,size);
+    corunCalcSinkermotor(co_run, line, size);
 
     if (IS_ECONO_BEGIN_END(*step)) {
         co_run->nextline++;
@@ -1109,7 +1101,7 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    corunCalcSinkermotor(co_run,line,size);
+    corunCalcSinkermotor(co_run, line, size);
 
     //welt;
     line->welt = co_run->welt = step->welt;
@@ -1163,8 +1155,8 @@ static bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
 }
 
 
-void corunReset(S_CO_RUN *co_run, uint32 size) {
-    corunSeekLine(co_run, 0, size);
+void corunReset(S_CO_RUN *co_run) {
+    corunSeekLine(co_run, 0, 0);
 }
 
 
@@ -1580,6 +1572,12 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         break;
     }
 }
+
+
+
+
+
+
 
 
 
