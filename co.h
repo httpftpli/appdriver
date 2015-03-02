@@ -510,6 +510,14 @@ __packed typedef  struct {
 CN_GROUP;
 
 
+#define CO_FILE_READ_ERROR  -1
+#define CO_FILE_CHECK_ERROR -2
+#define CO_FILE_READ_OK     0
+
+#define CO_FILE_WRITE_ERROR  -1
+#define CO_FILE_WRITE_DIFFILE  -2
+#define CO_FILE_WRITE_OK     0
+
 //==============================================================================
 //==============================================================================
 //================================================================================

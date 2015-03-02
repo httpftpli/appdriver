@@ -13,16 +13,16 @@
 static FUNC __func[1000];
 static struct list_head funcfreelist;
 
-static SPEED __speed[150];
+static SPEED __speed[400];
 static struct list_head speedfreelist;
 
 static FENGMEN __fengmen[1000];
 static struct list_head fengmenfreelist;
 
-static S_CO_RUN_STEP __run_step[800];
+static S_CO_RUN_STEP __run_step[1500];
 static struct list_head runstepfreelist;
 
-static WELT_PARAM __welt_param_pool[20];
+static WELT_PARAM __welt_param_pool[50];
 static struct list_head welt_param_freelist;
 
 static unsigned char cofilebuf[1024 * 2048];
@@ -144,12 +144,16 @@ static void readSpeed(uint8 *speedbuf, struct list_head *speed) {
         CO_SPEED *co_speed = (CO_SPEED *)speedbuf + i;
         if (co_speed->step != 0xffffffff) {
             SPEED *speedtemp = list_first_entry(&speedfreelist, SPEED, list);
-            memcpy(speedtemp->ramp, co_speed->ramp, sizeof speedtemp->ramp);
-            ASSERT(co_speed->rpm[0]==co_speed->rpm[1]);
+            list_del(&speedtemp->list);
+            for (int i = 0; i < 8; i++) {
+                speedtemp->ramp[i] = co_speed->ramp[i][0];
+                ASSERT(co_speed->ramp[i][0] == co_speed->ramp[i][1]);
+            }
+            ASSERT(co_speed->rpm[0] == co_speed->rpm[1]);
             speedtemp->rpm = co_speed->rpm[0];
             speedtemp->step = co_speed->step;
             speedtemp->coed = true;
-            list_move_tail(&speedtemp->list, speed);
+            list_add_tail(&speedtemp->list, speed);
         } else {
             break;
             //TODO: numof SPEED protect
@@ -259,14 +263,14 @@ static void readEconomizer(uint8 *econobuf, ECONOMIZER_PARAM *econo, uint32 *num
         for (int j = 0; j < 8; j++) {
             econo[i].economize[j] = param->economize[j][0];
         }
-        num++;
+        (*num)++;
     }
 }
 
 static void co_read_reset(S_CO *co, uint8 resetpartbuf[]) {
     CO_RESET_INFO *info = (CO_RESET_INFO *)resetpartbuf;
 
-    memcpy(&co->resetinfo,info,sizeof *info);
+    memcpy(&co->resetinfo, info, sizeof*info);
 
     co->diameter = info->diameter;
     co->niddle = info->niddle;
@@ -319,7 +323,7 @@ static void co_read_yarn(S_CO *co, uint8 yarnpartbuf[]) {
 static void co_read_cate(S_CO *co, uint8 catepartbuf[]) {
     CO_CATE_INFO *info = (CO_CATE_INFO *)catepartbuf;
 
-    memcpy(&co->cateinfo,info,sizeof *info);
+    memcpy(&co->cateinfo, info, sizeof*info);
 
     readSpeed(catepartbuf + info->speed_addr, &co->speed);
 
@@ -342,7 +346,7 @@ static bool co_read_mpp(S_CO *co, uint8 mpppartbuf[]) {
 static void co_read_supe(S_CO *co, uint8 supepartbuf[]) {
     CO_SUPE_INFO *supeinfo = (CO_SUPE_INFO *)supepartbuf;
 
-    memcpy(&co->supeinfo,supeinfo,sizeof *supeinfo);
+    memcpy(&co->supeinfo, supeinfo, sizeof*supeinfo);
 
 //read welt;
     readWelt(supepartbuf + supeinfo->weltAddrOffset, &co->welt);
@@ -354,7 +358,7 @@ static void co_read_supe(S_CO *co, uint8 supepartbuf[]) {
 
 
 
-uint32 co_get_crc(uint8 buf[], uint16 dwSize) {
+uint32 co_get_crc(void *dat, uint16 dwSize) {
 
     int i, j = 0;
     uint32 x;
@@ -364,7 +368,7 @@ uint32 co_get_crc(uint8 buf[], uint16 dwSize) {
     //uint32 len = dwSize;
     uint32 temp;
 
-
+    uint8 *buf = (uint8 *)dat;
     while (1) {
         x = buf[j];
         temp = buf[1 + j];
@@ -426,9 +430,6 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 
 
 
-#define CO_FILE_READ_ERROR  -1
-#define CO_FILE_CHECK_ERROR -2
-
 int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
     unsigned int br;
@@ -458,7 +459,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         goto ERROR;
     }
     //unsigned char ver = buf[28];
-    if (co->head.coCheck != co_get_crc((uint8 *)&co->head + 4, sizeof(CO_HEADER) - 4)) {
+    if (co->head.coCheck != get_co_check((uint8 *)&co->head + 4, sizeof(CO_HEADER) - 4)) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -470,7 +471,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (co->head.sec[0].check != co_get_crc(cofilebuf, co->head.sec[0].len << 8)) {
+    if (co->head.sec[0].check != get_co_check(cofilebuf, co->head.sec[0].len << 8)) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -483,7 +484,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (co->head.sec[1].check != co_get_crc(cofilebuf, co->head.sec[1].len << 8)) {
+    if (co->head.sec[1].check != get_co_check(cofilebuf, co->head.sec[1].len << 8)) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -496,7 +497,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (co->head.sec[2].check != co_get_crc(cofilebuf, co->head.sec[2].len << 8)) {
+    if (co->head.sec[2].check != get_co_check(cofilebuf, co->head.sec[2].len << 8)) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -509,7 +510,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (co->head.sec[3].check != co_get_crc(cofilebuf, co->head.sec[3].len << 8)) {
+    if (co->head.sec[3].check != get_co_check(cofilebuf, co->head.sec[3].len << 8)) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -525,7 +526,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (co->head.sec[7].check != co_get_crc(cofilebuf, co->head.sec[7].len << 8)) {
+    if (co->head.sec[7].check != get_co_check(cofilebuf, co->head.sec[7].len << 8)) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -594,69 +595,118 @@ void coRelease(S_CO *co) {
 }
 
 
-int32 coSave(S_CO *co, TCHAR *path){
+static void sinkerparamToCo(CO_SINKERMOTORPARAM *coparam, SINKERMOTORPARAM *param) {
+    for (int i = 0; i < 3; i++) {
+        coparam->qf_feed[i] = param->qf_feed / 1000;
+        coparam->qi_feed[i] = param->qi_feed / 1000;
+    }
+}
 
-#if 0
+static void sizemotorparamToCo(CO_SIZEMOTORPARAM *coparam, SIZEMOTORPARAM *param) {
+    for (int i = 0; i < 3; i++) {
+        coparam->start[i] = param->start / 1000;
+        coparam->end[i] = param->end / 1000;
+    }
+}
+
+
+int32 coSave(S_CO *co, TCHAR *path) {
     //open co file
     int32 re = 0;
+    uint32 br, wr;;
+    struct list_head *p;
+    FIL file;
+    CO_SPEED *cospeed;
+    CO_SIZEMOTOR_ZONE *cosizemotor;
+    CO_SINKERMOTOR_ZONE *cosinkermotor;
+    CO_ECONOMIZER_PARAM *co_eco;
+
     FRESULT r = f_open(&file, path, FA_WRITE | FA_READ);
     if (r != FR_OK) {
         re = CO_FILE_WRITE_ERROR;
         return re;
     }
 
-    f_read(&file,cofilebuf,f_size(&file));
-
-    if (memcpy(cofilebuf,co->head,sizeof co->head)) {
-        re = CO_FILE_WRITE_DIFFILE ;
+    r = f_read(&file, cofilebuf, f_size(&file), &br);
+    if (r != FR_OK && br != f_size(&file)) {
+        re = CO_FILE_WRITE_ERROR;
+        goto ERROR;
     }
-    struct list_head *p;
+    if (memcmp(cofilebuf, &co->head, sizeof co->head)) {
+        re = CO_FILE_WRITE_DIFFILE;
+        goto ERROR;
+    }
     //speed
-    list_for_each(p,&co->speed){
-        SPEED *speed = list_entry(n,SPEED,list);
-        CO_SPEED cospeed;
-        cospeed.step = speed->step;
-        cospeed.rpm[0] = cospeed.rpm[1] = speed->rpm;
-        for (int i=0;i<8;i++) {
-             cospeed.ramp[i][0] = cospeed.ramp[i][1] = speed->ramp[i];
+    cospeed = (CO_SPEED *)(cofilebuf + (co->head.sec[2].offset << 8) + co->cateinfo.speed_addr);
+    list_for_each(p, &co->speed) {
+        SPEED *speed = list_entry(p, SPEED, list);
+        cospeed->step = speed->step;
+        cospeed->rpm[0] = cospeed->rpm[1] = speed->rpm;
+        for (int i = 0; i < 8; i++) {
+            cospeed->ramp[i][0] = cospeed->ramp[i][1] = speed->ramp[i];
         }
-        uint32 wr;
-        r = f_write(&file,cospeed,sizeof *cospeed,&wr);
-        if (r != FR_OK && wr!=sizeof *cospeed) {
-            re = CO_FILE_READ_ERROR;
-            return false;
-        }
+        cospeed++;
     }
     //sizemotor
-    f_lseek(&file,co->head.sec[0].offset+co->resetinfo.sizemotorAddr);
-    list_for_each(p,&co->speed){
-        SPEED *speed = list_entry(n,SPEED,list);
-        CO_SPEED cospeed,*cospeedwr;
-        cospeed.step = speed->step;
-        cospeed.rpm[0] = cospeed.rpm[1] = speed->rpm;
-        for (int i=0;i<8;i++) {
-             cospeed.ramp[i][0] = cospeed.ramp[i][1] = speed->ramp[i];
-        }
-        uint32 wr;
-        r = f_write(&file,cospeed,sizeof *cospeed,&wr);
-        if (r != FR_OK && wr!=sizeof *cospeed) {
-            re = CO_FILE_READ_ERROR;
-            return false;
+    cosizemotor = (CO_SIZEMOTOR_ZONE *)(cofilebuf + (co->head.sec[0].offset << 8) + co->resetinfo.sizemotorAddr);
+    for (int i = 0; i < co->numofsizemotorzone; i++) {
+        for (int j = 0; j < 8; j++) {
+            sizemotorparamToCo(&cosizemotor[i].param[j], &co->sizemotor[i].param[j]);
         }
     }
 
     //sinkermotor
+    cosinkermotor = (CO_SINKERMOTOR_ZONE *)(cofilebuf + (co->head.sec[0].offset << 8)
+                                            + co->resetinfo.sinkermotor_feed1_3_Addr);
+    for (int i = 0; i < co->numofsinkmoterzone_1_3; i++) {
+        for (int j = 0; j < 8; j++) {
+            sinkerparamToCo(&cosinkermotor[i].param[j], &co->sinkmoterzone_1_3[i].param[j]);
+        }
+    }
 
     //sinkermotor2-4
-
+    cosinkermotor = (CO_SINKERMOTOR_ZONE *)(cofilebuf + (co->head.sec[0].offset << 8) + co->resetinfo.sinkermotor_feed2_4_Addr);
+    for (int i = 0; i < co->numofsinkmoterzone_2_4; i++) {
+        for (int j = 0; j < 8; j++) {
+            sinkerparamToCo(&cosinkermotor[i].param[j], &co->sinkmoterzone_2_4[i].param[j]);
+        }
+    }
     //sinkermotor angle
-
+    cosinkermotor = (CO_SINKERMOTOR_ZONE *)(cofilebuf + (co->head.sec[0].offset << 8) + co->resetinfo.sinkerangular_Addr);
+    for (int i = 0; i < co->numofsinkangular; i++) {
+        for (int j = 0; j < 8; j++) {
+            sinkerparamToCo(&cosinkermotor[i].param[j], &co->sinkangular[i].param[j]);
+        }
+    }
     //economizer
+    co_eco = (CO_ECONOMIZER_PARAM *)(cofilebuf + (co->head.sec[7].offset << 8) + co->supeinfo.econoAddrOffset);
+    for (int i = 0; i < co->numofeconomizer; i++) {
+        for (int j = 0; j < 8; j++) {
+            co_eco[i].economize[j][0] = co->econo[i].economize[j];
+            co_eco[i].economize[j][1] = co->econo[i].economize[j];
+        }
+    }
 
     //recalulate check data
+    CO_HEADER *cohead = (CO_HEADER *)cofilebuf;
+    cohead->sec[0].check = get_co_check(cofilebuf + (co->head.sec[0].offset << 8), co->head.sec[0].len << 8);
+    cohead->sec[2].check = get_co_check(cofilebuf + (co->head.sec[2].offset << 8), co->head.sec[2].len << 8);
+    cohead->sec[7].check = get_co_check(cofilebuf + (co->head.sec[7].offset << 8), co->head.sec[7].len << 8);
+    cohead->coCheck = get_co_check(cofilebuf + 4, 512 - 4);
 
-#endif
+    //write to file
+    f_lseek(&file, 0);
+    r = f_write(&file, cofilebuf, f_size(&file), &wr);
+    if (r != FR_OK && wr != f_size(&file)) {
+        re = CO_FILE_WRITE_ERROR;
+        goto ERROR;
+    }
+    f_close(&file);
+    return re;
 
+    ERROR:
+    f_close(&file);
+    return re;
 }
 
 
@@ -881,7 +931,7 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     co_run->numofstep = co->numofstep;
     co->run = co_run;
     co_run->co = co;
-  //reset co_run
+    //reset co_run
     corunReset(co_run);
 }
 
