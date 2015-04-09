@@ -7,6 +7,11 @@
 #include "co.h"
 #include "algorithm.h"
 #include "debug.h"
+#include <wchar.h>
+
+
+
+#define MOTOR_SCALE   1
 
 
 
@@ -96,8 +101,8 @@ static void readSinkMotor(void *sinkmotorbuf, SINKERMOTOR_ZONE *zone, unsigned i
             zonetemp->head.groupNum = co_zone->head.groupNum;
 
             for (int i = 0; i < 8; i++) {
-                zonetemp->param[i].qf_feed = co_zone->param[i].qf_feed[0] * 1000;
-                zonetemp->param[i].qi_feed = co_zone->param[i].qi_feed[0] * 1000;
+                zonetemp->param[i].qf_feed = co_zone->param[i].qf_feed[0] * MOTOR_SCALE;
+                zonetemp->param[i].qi_feed = co_zone->param[i].qi_feed[0] * MOTOR_SCALE;
             }
             (*num)++;
         } else {
@@ -123,10 +128,10 @@ static void readSizemotor(uint8 *sizemotorbuf, SIZEMOTOR_ZONE *zone, unsigned in
             zone_temp->head.groupNum = co_szone->head.groupNum;
 
             for (int i = 0; i < 8; i++) {
-                zone_temp->param[i].start = co_szone->param[i].start[0] * 1000;
+                zone_temp->param[i].start = co_szone->param[i].start[0] * MOTOR_SCALE;
                 zone_temp->param[i].startWidth = co_szone->param[i].startWidth;
                 zone_temp->param[i].startWidthDec = co_szone->param[i].startWidthDec;
-                zone_temp->param[i].end = co_szone->param[i].end[0] * 1000;
+                zone_temp->param[i].end = co_szone->param[i].end[0] * MOTOR_SCALE;
                 zone_temp->param[i].endWidth = co_szone->param[i].endWidth;
                 zone_temp->param[i].endWidthDec = co_szone->param[i].endWidthDec;
             }
@@ -432,6 +437,7 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 
 int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
+    FILINFO fileinfo;
     unsigned int br;
     int32 re = 0;
 
@@ -451,7 +457,14 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         return false;
     }
+#if 0
+#if _LFN_UNICODE ==1
+    wcsncpy(co->filename, fileinfo.lfname, 63);
+#else
+    strcpy(co->filename, fileinfo.fname);
+#endif
 
+#endif
     //READ CO HEAD
     r = f_read(&file, &co->head, sizeof(CO_HEADER), &br);
     if (r != FR_OK || br != sizeof(CO_HEADER)) {
@@ -597,15 +610,15 @@ void coRelease(S_CO *co) {
 
 static void sinkerparamToCo(CO_SINKERMOTORPARAM *coparam, SINKERMOTORPARAM *param) {
     for (int i = 0; i < 3; i++) {
-        coparam->qf_feed[i] = param->qf_feed / 1000;
-        coparam->qi_feed[i] = param->qi_feed / 1000;
+        coparam->qf_feed[i] = param->qf_feed / MOTOR_SCALE;
+        coparam->qi_feed[i] = param->qi_feed / MOTOR_SCALE;
     }
 }
 
 static void sizemotorparamToCo(CO_SIZEMOTORPARAM *coparam, SIZEMOTORPARAM *param) {
     for (int i = 0; i < 3; i++) {
-        coparam->start[i] = param->start / 1000;
-        coparam->end[i] = param->end / 1000;
+        coparam->start[i] = param->start / MOTOR_SCALE;
+        coparam->end[i] = param->end / MOTOR_SCALE;
     }
 }
 
@@ -616,6 +629,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
     uint32 br, wr;;
     struct list_head *p;
     FIL file;
+    CO_HEADER *cohead;
     CO_SPEED *cospeed;
     CO_SIZEMOTOR_ZONE *cosizemotor;
     CO_SINKERMOTOR_ZONE *cosinkermotor;
@@ -688,7 +702,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
     }
 
     //recalulate check data
-    CO_HEADER *cohead = (CO_HEADER *)cofilebuf;
+    cohead = (CO_HEADER *)cofilebuf;
     cohead->sec[0].check = get_co_check(cofilebuf + (co->head.sec[0].offset << 8), co->head.sec[0].len << 8);
     cohead->sec[2].check = get_co_check(cofilebuf + (co->head.sec[2].offset << 8), co->head.sec[2].len << 8);
     cohead->sec[7].check = get_co_check(cofilebuf + (co->head.sec[7].offset << 8), co->head.sec[7].len << 8);
@@ -712,8 +726,8 @@ int32 coSave(S_CO *co, TCHAR *path) {
 
 static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
     SPEED *speed;
-    speed = list_first_entry(&co->speed, SPEED, list);
-    if (speed->step != 0) {
+    speed = list_first_entry_or_null(&co->speed, SPEED, list);
+    if (speed==NULL || speed->step != 0) {
         speed = list_first_entry(&speedfreelist, SPEED, list);
         speed->step = 0;
         speed->rpm = 50;
@@ -731,7 +745,7 @@ static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
         if (speed->step == i) {
             step->speed = speed;
-            speed = list_entry(step->list.next, SPEED, list);
+            speed = list_entry(speed->list.next, SPEED, list);
         } else {
             step->speed = NULL;
         }
@@ -784,12 +798,18 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
             S_CO_RUN_STEP *beginstep = co_run->stepptr[co->econo[iecon].begin];
             beginstep->econoFlag |= ECONO_BEGIN;
             beginstep->econo = &co->econo[iecon];
+            for (int i = beginstep->istep; i <= step->istep; i++) {
+                co_run->stepptr[i]->econoFlag |= ECONO_INECONO;
+            }
             unsigned econodif = co->econo[iecon].end - co->econo[iecon].begin + 1;
             for (int j = 0; j < 8; j++) {
-                co_run->numofline[j] += econodif * co->econo[iecon].economize[j];
-                if (i != co->numofstep - 1) {
+                co_run->numofline[j] += econodif * (co->econo[iecon].economize[j] - 1) + 1;
+                if (i != 0) { //set ECONO_END step ilinetag
+                    co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j] + 1;
+                }
+                if (i != co->numofstep - 1) { //set next step ilinetag
                     co_run->stepptr[i + 1]->ilinetag[j] = co_run->stepptr[i]->ilinetag[j]
-                                                          + econodif * co->econo[iecon].economize[j];
+                                                          + econodif * (co->econo[iecon].economize[j] - 1) + 1;
                 }
             }
             iecon++;
@@ -798,7 +818,7 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
             step->econoFlag = 0;
             for (int j = 0; j < 8; j++) {
                 co_run->numofline[j]++;
-                if (i != 0) {
+                if (i != 0 && !IS_ECONO_END(*co_run->stepptr[i - 1])) {
                     co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j] + 1;
                 }
             }
@@ -907,6 +927,7 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = list_entry(runstepfreelist.next, S_CO_RUN_STEP, list);
         co_run->stepptr[i] = step;
+        step->istep = i;
         list_move_tail(&step->list, &co_run->step);
     }
 
@@ -931,8 +952,6 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     co_run->numofstep = co->numofstep;
     co->run = co_run;
     co_run->co = co;
-    //reset co_run
-    corunReset(co_run);
 }
 
 
@@ -952,30 +971,29 @@ static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc)
 static void corunCalcSpeed(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     //calculate speed;
     int16 acc;
-    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
+    S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
     if (step->speed != NULL) {
         int32 tarrpm = step->speed->rpm;
         int32 ramp = step->speed->ramp[size];
-        acc = (tarrpm - (int32)co_run->prerpm) / ramp;
-        co_run->speedAcc = acc;
-        co_run->targetSpeed = tarrpm;
+        acc = (tarrpm - (int32)line->prerpm) / ramp;
+        line->speedAcc = acc;
+        line->targetSpeed = tarrpm;
     }
 
-    co_run->rpm = co_run->prerpm + co_run->speedAcc;
-    if (co_run->speedAcc < 0 && co_run->rpm < co_run->targetSpeed) {
-        co_run->rpm = co_run->targetSpeed;
-    } else if (co_run->speedAcc > 0 && co_run->rpm > co_run->targetSpeed) {
-        co_run->rpm = co_run->targetSpeed;
+    line->rpm = line->prerpm + line->speedAcc;
+    if (line->speedAcc < 0 && line->rpm < line->targetSpeed) {
+        line->rpm = line->targetSpeed;
+    } else if (line->speedAcc > 0 && line->rpm > line->targetSpeed) {
+        line->rpm = line->targetSpeed;
     }
-    if (co_run->rpm == co_run->targetSpeed) {
-        co_run->speedAcc = 0;
+    if (line->rpm == line->targetSpeed) {
+        line->speedAcc = 0;
     }
-    line->rpm = co_run->rpm;
 }
 
 
 static void corunCalcSizemotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
-    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
+    S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
 
     SIZEMOTOR_ZONE *sizemotor_zone = step->sizemotor;
     if (sizemotor_zone != NULL) {
@@ -991,53 +1009,85 @@ static void corunCalcSizemotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 siz
             || (sizemotoracc < 0 && co_run->sizemotor < sizemotorend)) {
             co_run->sizemotor = sizemotorend;
         }*/
-        co_run->sizemotor = mathCalcuLineFunc(sizemotorbase, sizemotorend,
-                                              sizemotorbaseline, co_run->nextline,
-                                              sizemotoracc);
+        line->sizemotor = mathCalcuLineFunc(sizemotorbase, sizemotorend,
+                                            sizemotorbaseline, line->iline,
+                                            sizemotoracc);
+        if (IS_ECONO_BEGIN_END(*step)) {
+            if (line->iline == step->ilinetag[size]) {
+                line->stepSizemotorBase = mathCalcuLineFunc(sizemotorbase, sizemotorend,
+                                                            sizemotorbaseline, step->ilinetag[size],
+                                                            sizemotoracc);
+                line->stepSizemotorAcc = sizemotoracc;
+            }
+        } else {
+            line->stepSizemotorBase = 0;
+            line->stepSizemotorAcc = 0;
+        }
     } else {
         line->zonename = NULL;
         line->zonebegin = 0;
         line->zoneend = 0;
     }
-    line->sizemotor = co_run->sizemotor;
 }
 
-static void corunCalcSinkermotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
-    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
+static void corunCalcSinkermotor1_3(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
     SINKERMOTOR_ZONE *sinkermotor_zone_1_3 = step->sinkmoterzone_1_3;
     if (sinkermotor_zone_1_3 != NULL) {
         uint32 sinkermotorbase = sinkermotor_zone_1_3->param[size].qi_feed;
         int32 sinkermotoracc = sinkermotor_zone_1_3->param[size].acc;
         uint32 sinkermotorend = sinkermotor_zone_1_3->param[size].qf_feed;
         uint32 sinkermotorbaseline = co_run->stepptr[sinkermotor_zone_1_3->head.beginStep]->ilinetag[size];
-        co_run->sinkmotor1_3 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
-                                                 sinkermotorbaseline, co_run->nextline,
-                                                 sinkermotoracc);
+        line->sinkmotor1_3 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
+                                               sinkermotorbaseline, line->iline,
+                                               sinkermotoracc);
+        if (IS_ECONO_BEGIN_END(*step)) {
+            if (line->iline == step->ilinetag[size]) {
+                line->stepSinkermotor1_3Base = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
+                                                                 sinkermotorbaseline, step->ilinetag[size],
+                                                                 sinkermotoracc);
+                line->stepsinkermotor1_3Acc = sinkermotoracc;
+            } else {
+                line->stepSinkermotor1_3Base = 0;
+                line->stepsinkermotor1_3Acc = 0;
+            }
+        }
     }
-    line->sinkmotor1_3 = co_run->sinkmotor1_3;
 }
 
-uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
-    co_run->prestep = co_run->istep;
-    uint32 stepindex = co_run->istep = co_run->nextstep;
-    co_run->prerpm = co_run->rpm;
+int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size) {
+    ASSERT(linepre->co_run == co_run);
+    line->co_run = linepre->co_run;
+    int32 preistep = linepre->istep;
+    int32 stepindex = line->istep = linepre->nextstep;
+
+    int32 iline = line->iline = linepre->nextline;
+
     S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
 
-    if (stepindex >= co_run->numofstep) {
+    if (iline >= co_run->numofline[size]) {
         return -1;
     }
 
+
     //calculate speed
+    line->prerpm = linepre->rpm;
+    line->speedAcc = linepre->speedAcc;
+    line->targetSpeed = linepre->targetSpeed;
     corunCalcSpeed(co_run, line, size);
 
     //calculate sizemotor;
+    line->stepSizemotorBase = linepre->stepSizemotorBase;
+    line->stepSizemotorAcc = linepre->stepSizemotorBase;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    corunCalcSinkermotor(co_run, line, size);
+    line->stepSinkermotor1_3Base = linepre->stepSinkermotor1_3Base;
+    line->stepsinkermotor1_3Acc = linepre->stepsinkermotor1_3Acc;
+    corunCalcSinkermotor1_3(co_run, line, size);
 
     //calculate sinker motor_2_4
-    SINKERMOTOR_ZONE *sinkermotor_zone_2_4 = step->sinkmoterzone_2_4;
+    /*SINKERMOTOR_ZONE *sinkermotor_zone_2_4 = step->sinkmoterzone_2_4;
     if (sinkermotor_zone_2_4 != NULL) {
         uint32 sinkermotorbase = sinkermotor_zone_2_4->param[size].qi_feed;
         int32 sinkermotoracc = sinkermotor_zone_2_4->param[size].acc;
@@ -1046,16 +1096,16 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
         co_run->sinkmotor2_4 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
                                                  sinkermotorbaseline, co_run->nextline,
                                                  sinkermotoracc);
-    }
+    }*/
     //welt;
-    line->welt = co_run->welt = step->welt;
+    line->welt = step->welt;
 
     //funcode
     line->flag = 0;
     funcodeParse(step->func, line->act, line->alarm, &line->flag);
 
     //fengmen
-    if (step->fengmen != NULL && co_run->prestep != co_run->istep) {
+    if (step->fengmen != NULL && stepindex != preistep) {
         line->isfengmenAct = true;
         memset(line->fengmen, 0, sizeof line->fengmen);
         struct list_head *p;
@@ -1069,76 +1119,95 @@ uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     }
 
     //process step ,calculate next step
-    if (IS_ECONO_BEGIN(*step)) { // loop begin
-        co_run->iecono++;
-        co_run->econonum = step->econo->economize[size];
-        co_run->econostepfrom = step->econo->begin;
-        co_run->econostepto = step->econo->end;
-    }
-    if (IS_ECONO_END(*step)) { //loop end
-        if (co_run->iecono == co_run->econonum) { //end loop
-            co_run->nextstep++;
-            co_run->iecono = 0;
-            co_run->econostepfrom = 0;
-            co_run->econostepto = 0;
-            co_run->econonum = 0;
+    if (IS_ECONO_INECONO(*step)) {
+        if (IS_ECONO_BEGIN(*step)) {
+            line->iecono = linepre->iecono + 1;
+            line->econobegin = step->econo->begin;
+            line->econoend = step->econo->end;
+            line->econonum = step->econo->economize[size];
+            if (!IS_ECONO_BEGIN_END(*step)) {
+                line->nextstep = stepindex + 1;
+            } else {
+                line->nextstep = stepindex;
+                line->isStepEcono = true;
+                if (line->iecono == line->econonum) { //last loop
+                    line->nextstep = stepindex + 1;
+                }
+            }
+        } else if (IS_ECONO_END(*step)) {
+            if (line->iecono == line->econonum) { //last loop
+                line->nextstep = stepindex + 1;
+            } else {
+                line->nextstep = line->econobegin;
+            }
         } else {
-            co_run->nextstep = co_run->econostepfrom;
+            line->nextstep = stepindex + 1;
+        }
+
+        if (line->iecono != 0) {
+            line->ieconodisplay = line->iecono - 1;
+        } else {
+            line->ieconodisplay = 0;
         }
     } else {
-        co_run->nextstep++;
+        line->nextstep = stepindex + 1;
+        line->iecono = 0;
+        line->ieconodisplay = 0;
+        line->econobegin = 0;
+        line->econoend = 0;
+        line->econonum = 1;
+        line->isStepEcono = false;
     }
-
-    co_run->nextline++;
-
-
-    line->econonum = co_run->econonum;
-    line->iecono = co_run->iecono;
-    line->econobegin = co_run->econostepfrom;
-    line->econoend = co_run->econostepto;
-
-
-
-    line->sinkmotor2_4 = co_run->sinkmotor2_4;
-
-    line->iline = co_run->nextline - 1;
-    line->istep = stepindex;
-
-    //line->act = co_run->act;
-
+    line->nextline = iline + 1;
     return co_run->numofline[size] - line->iline - 1;
 }
 
 
 void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
-    S_CO_RUN_STEP *step = co_run->stepptr[co_run->istep];
-    S_CO_RUN_STEP *nextstep = co_run->stepptr[co_run->istep + 1];
-    co_run->rpm = line->rpm = 200;
+    ASSERT(line->co_run == co_run);
+    line->iline = line->nextline;
+    S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
+    //S_CO_RUN_STEP *nextstep = co_run->stepptr[line->istep + 1];
+    line->rpm = 200;
 
     //calculate sizemotor;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    corunCalcSinkermotor(co_run, line, size);
+    corunCalcSinkermotor1_3(co_run, line, size);
 
+    //process step ,calculate next step
     if (IS_ECONO_BEGIN_END(*step)) {
-        co_run->nextline++;
-        line->iline = co_run->nextline - 1;
-        if (co_run->istep != co_run->numofstep - 1) { //not last step
-            if (co_run->nextline == nextstep->ilinetag[size] - 1) {
-                co_run->nextline = step->ilinetag[size];
-            }
-        } else { //lastmotor step
-            co_run->nextline = step->ilinetag[size];
+        line->iecono++;
+        if (line->nextline == step->ilinetag[size]) {
+            line->iecono = 1;
+        }
+        if (line->iecono != line->econonum) { //not last loop
+            line->nextline++;
+        } else { //last loop
+            line->nextline = step->ilinetag[size];
+            //line->iecono = 0;
+        }
+        if (line->iecono != 0) {
+            line->ieconodisplay = line->iecono - 1;
+        } else {
+            line->ieconodisplay = 0;
         }
     }
 }
 
 
 
-uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
-    uint32 stepindex = co_run->istep = co_run->nextstep;
-    co_run->prerpm = co_run->rpm;
+
+uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size) {
+    ASSERT(linepre->co_run == co_run);
+    line->co_run = linepre->co_run;
+    int32 preistep = linepre->istep;
+    int32 stepindex = line->istep = linepre->istep + 1;
+    line->iline = co_run->stepptr[stepindex]->ilinetag[size];
+
+
+    line->prerpm = linepre->rpm;
     S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
 
     if (stepindex >= co_run->numofstep) {
@@ -1146,67 +1215,72 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     }
 
     //calculate speed;
+    line->prerpm = linepre->rpm;
+    line->speedAcc = linepre->speedAcc;
+    line->targetSpeed = linepre->targetSpeed;
     corunCalcSpeed(co_run, line, size);
+
     //calculate sizemotor
+    line->stepSizemotorBase = linepre->stepSizemotorBase;
+    line->stepSizemotorAcc = linepre->stepSizemotorBase;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    corunCalcSinkermotor(co_run, line, size);
+    line->stepSinkermotor1_3Base = linepre->stepSinkermotor1_3Base;
+    line->stepsinkermotor1_3Acc = linepre->stepsinkermotor1_3Acc;
+    corunCalcSinkermotor1_3(co_run, line, size);
+    corunCalcSinkermotor1_3(co_run, line, size);
 
     //welt;
-    line->welt = co_run->welt = step->welt;
+    line->welt = step->welt;
 
     //funcode
     funcodeParse(step->func, line->act, line->alarm, &line->flag);
 
     //process step
-    co_run->nextstep++;
-    co_run->nextline = co_run->stepptr[co_run->nextstep]->ilinetag[size];
+    line->ieconodisplay = 0;
+    line->nextstep = line->istep + 1;
+    if (line->nextstep < co_run->numofstep) {
+        line->nextline = co_run->stepptr[line->nextstep]->ilinetag[size];
+    }
 
-    //set line data;
-    line->econonum = co_run->econonum;
-    line->iecono = co_run->iecono;
-    line->econobegin = co_run->econostepfrom;
-    line->econoend = co_run->econostepto;
-    line->iline = co_run->nextline - 1;
-    line->istep = stepindex;
-
-    return co_run->numofline[size] - line->iline - 1;
+    if (IS_ECONO_INECONO(*step)) {
+        if (IS_ECONO_BEGIN(*step)) { // loop begin
+            line->iecono = step->econo->economize[size];
+            line->econonum = step->econo->economize[size];
+            line->econobegin = step->econo->begin;
+            line->econoend = step->econo->end;
+        }
+    } else {
+        line->iecono = 0;
+        line->econobegin = 0;
+        line->econoend = 0;
+        line->econonum = 1;
+    }
+    return co_run->numofstep - line->istep - 1;
 }
 
 
 
-static bool corunSeekLine(S_CO_RUN *co_run, uint32 line, uint32 size) {
-    if (line >= co_run->numofline[size]) {
-        return false;
-    }
+void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line) {
     //seek 0
-    co_run->prestep = -2;
-    co_run->istep = -1;
-    co_run->nextstep = 0;               //nextstep != istep+1, due to economizer
-
-    co_run->nextline = 0;
-
-    co_run->prerpm = 0;
-    co_run->rpm = 0;
-    co_run->iecono = 0;                  //current economizer counter
-    co_run->econonum = 0;                //economizer
-    co_run->econostepfrom = 0;           //economizer begin step
-    co_run->econostepto = 0;             //economizer end step(end>begin)
-    co_run->speedAcc = 0;                //speed acceleration when run
-    co_run->targetSpeed = 0;             //target speed when ramp
-    co_run->sizemotor = 0;
-    //seek line;
-    S_CO_RUN_LINE dummyline;
-    for (int i = 0; i < line; i++) {
-        corunReadLine(co_run, &dummyline, size);
-    }
-    return true;
-}
-
-
-void corunReset(S_CO_RUN *co_run) {
-    corunSeekLine(co_run, 0, 0);
+    line->co_run = co_run;
+    line->istep = -1;
+    line->nextstep = 0;               //nextstep != istep+1, due to economizer
+    line->iline = -1;
+    line->nextline = 0;
+    line->isStepEcono = false;
+    line->prerpm = 0;
+    line->rpm = 0;
+    line->iecono = 0;                  //current economizer counter
+    line->econonum = 1;                //economizer
+    line->econobegin = 0;           //economizer begin step
+    line->econoend = 0;             //economizer end step(end>begin)
+    line->speedAcc = 0;                //speed acceleration when run
+    line->targetSpeed = 0;             //target speed when ramp
+    line->sizemotor = 0;
+    line->sinkmotor1_3 = 0;
+    line->sinkmotor2_4 = 0;
 }
 
 
@@ -1403,7 +1477,7 @@ static uint16 freeselcode2Valvecode(uint16 funcval) {
         feed = (funcval - 0x65) / 2 % 4;
         valvecode |= SEL_LINE_NUMBER * feed + line + SEL_BASE;
     } else if (funcval >= 0xc5 && funcval <= 0x104) { //free sel line 9 to line 16
-        valvecode = (!(funcval - 0xc5) % 2) << 12;  //in:1<<12  out:0<<12
+        valvecode = !((funcval - 0xc5) % 2) << 12;  //in:1<<12  out:0<<12
         line = (funcval - 0xc5) / 8 + 8;
         feed = (funcval - 0xc5) / 2 % 4;
         valvecode |= SEL_LINE_NUMBER * feed + line + SEL_BASE;
@@ -1467,25 +1541,35 @@ static void fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num)
 static uint16 hafuzhencode2Valvecode(uint16 funcval) {
     funcval -= 0x0d;
     uint32 valvecode = !(funcval & 0x01ul) << 12;
-    valvecode |= HAFUZHEN_BASE + funcval >> 2;
+    valvecode |= HAFUZHEN_BASE + (funcval >> 1);
     return valvecode;
 }
 
 
+static uint16 common0506func2Valvecode(uint16 funcval){
+    return COMM_FUNC_BASE + funcval | 1<<12;
+}
+
 
 
 static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
-    static uint16 caminoutmap[4][3][3] = { //[feed][stx][ace]
-        { { 0, 293, 113 }, { 0, 293, 113}, { 0, 0, 0}},
-        { { 0, 23, 203}, { 0, 23, 203}, { 0, 23, 23}},
-        { { 0, 113, 293}, { 0, 113, 293}, { 0, 0, 0}},
-        { { 0, 203, 23}, { 0, 203, 23}, { 0, 203, 23}},
+    static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
+        { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}},
+        { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}},
+        { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff},  { 0, 113, 293}},
+        { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
     };
 
     bool in = false;
     uint32 pos_ace = fun->value % 3;
     uint32 sxt = fun->value / 3 % 3;
     uint32 feed = fun->value / 9;
+
+    *num = 0;
+    if (caminoutmap[feed][sxt][pos_ace]==0xffff) {
+        //TODO guide
+        return;
+    }
     if (caminoutmap[feed][sxt][pos_ace] == fun->angular) {
         in = true;
     }
@@ -1495,6 +1579,8 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
             valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan out
             valvecode[1] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban out
             *num = 2;
+        }else{
+            //TODO GUIDE
         }
         break;
     case 1: //C
@@ -1512,6 +1598,8 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
             valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban in
             valvecode[1] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan in
             *num = 2;
+        }else{
+            //TODO GUIDE
         }
         break;
     default:
@@ -1526,25 +1614,18 @@ static uint16 yarnfinger2Valvecode(uint16 funcval) {
     valvecode = !(funcval % 2) << 12; //in:1<<12  out:0<<12
     feed = (funcval - 0x48) / 20;               // yarn 4 feeds,  one feed Contain 10 in 10 out
     finger = (funcval - 0x48 - (feed * 20)) / 2;
-    valvecode |= (YARN_FINGER_BASE + (0x0f * feed) + finger);
+    valvecode |= (YARN_FINGER_BASE + (YARN_LINE_NUMBER * feed) + finger);
     return valvecode;
 }
 
 static uint16 misc0203code2Valvecode(uint16 codevalue) {
     int16 inorout;
     int16 ivalve;
-    int16 re;
-    if (codevalue <= 0x47) {
+    int16 re = 0xffff;
+    if ((codevalue <= 0x47) || (codevalue >= 0x98 && codevalue <= 0xa9) 
+        ||(codevalue >= 0xb4 && codevalue <= 0xc3)) {
         inorout = !(codevalue % 2) << 12;
-        ivalve = codevalue >> 2;
-        re = inorout | ivalve + VALVE_MIS_BASE;
-    } else if (codevalue >= 0x98 && codevalue <= 0xa9) {
-        inorout = !(codevalue % 2) << 12;
-        ivalve = codevalue - (0x98 - 0x48) >> 2;
-        re = inorout | ivalve + VALVE_MIS_BASE;
-    } else if (codevalue >= 0xb4 && codevalue <= 0xc3) {
-        inorout = !(codevalue % 2) << 12;
-        ivalve = codevalue - (0xb4 - 0xaa) - (0x98 - 0x48) >> 2;
+        ivalve = codevalue >> 1;
         re = inorout | ivalve + VALVE_MIS_BASE;
     }
     return re;
@@ -1592,7 +1673,7 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                 *alarmnum = 1;
             }
         } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
-            *valvecode = hafuzhencode2Valvecode(fun->funcode);
+            *valvecode = hafuzhencode2Valvecode(fun->value);
             *valnum = 1;
         } else if ((fun->value >= 0x65 && fun->value <= 0xa4)
                    || (fun->value >= 0xc5 && fun->value <= 0x104)) { //free sel line 1 to line8
@@ -1604,12 +1685,16 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         }
         break;
     case 0x0302: //YARN finger
-        if (fun->value >= 0x48 && fun->value <= 0x98) {
+        if (fun->value >= 0x48 && fun->value < 0x98) {
             *valvecode = yarnfinger2Valvecode(fun->value);
             *valnum = 1;
         } else {
             *valvecode = misc0203code2Valvecode(fun->value);
-            *valnum = 1;
+            if (*valvecode!=0xffff) {
+                *valnum = 1;
+            }else{
+                //TODO GUIDING
+            }
         }
         break;
     case 0x0305:  //cam
@@ -1617,6 +1702,10 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         if (*valnum != 0) {
             *flag |= LINE_FLAG_ACT;
         }
+        break;
+    case 0x0300:
+        *valvecode = common0506func2Valvecode(fun->value);
+        *valnum = 1;
         break;
     default:
         break;

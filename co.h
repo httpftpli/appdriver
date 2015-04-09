@@ -6,6 +6,7 @@
 #include "list.h"
 #include "ff.h"
 #include "co.h"
+#include "ffconf.h"
 
 
 #define FEED_NUMBER   6
@@ -22,6 +23,9 @@
 #define VALVE_MIS_NUMBER  64
 
 
+#define COMM_FUNC_BASE    0x2a0
+
+
 
 typedef __packed struct {
     uint16 unkown;
@@ -30,7 +34,8 @@ typedef __packed struct {
     uint16 len;
     char unkown2[17];
     uint32 check;
-}CO_SECTION;
+}
+CO_SECTION;
 
 
 typedef __packed struct {
@@ -41,11 +46,11 @@ typedef __packed struct {
     char unkown[44];
     CO_SECTION sec[14];
     char unkown1[4];
-}CO_HEADER ;
+}
+CO_HEADER;
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 sizet;
     uint32 diameter;
     uint16 niddle;
@@ -66,8 +71,7 @@ CO_RESET_INFO;
 
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     char unknow[32];
     uint32 pyf1addr;
     uint32 pyf2addr;
@@ -94,8 +98,7 @@ __packed typedef struct
 CO_PART2_ATTRIB;
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     char unknow[40];
     uint32 func_addr;
     char unknow1[8];
@@ -105,8 +108,7 @@ __packed typedef struct
 CO_CATE_INFO;
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     char unkown[56];
     uint32 fengmen1addr;
     uint32 fengmen2addr;
@@ -114,8 +116,7 @@ __packed typedef struct
 CO_MPP_INFO;
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 beginFlag; //0xffff
     uint16 angle;
     uint16 beginStep;
@@ -126,8 +127,7 @@ __packed typedef struct
 CO_MOTORHEAD;
 
 
-typedef struct
-{
+typedef struct {
     uint16 beginStep;
     uint16 endStep;
     uint16 angle;
@@ -135,8 +135,7 @@ typedef struct
 }MOTORHEAD;
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 start[3];     //motor duplicate 3 times
     uint16 startWidth;
     uint16 startWidthDec; //dec: 0-0,1-0.25 3-0.75
@@ -147,8 +146,7 @@ __packed typedef struct
 CO_SIZEMOTORPARAM;
 
 
-typedef struct
-{
+typedef struct {
     int32 start;
     uint16 startWidth;
     uint16 startWidthDec; //dec: 0-0,1-0.25 3-0.75
@@ -158,8 +156,7 @@ typedef struct
     int32 acc;
 }SIZEMOTORPARAM;
 
-__packed typedef struct
-{
+__packed typedef struct {
     unsigned int size;
     unsigned int prev; //0x00000000
     char descrpition[24];
@@ -169,8 +166,7 @@ __packed typedef struct
 CO_SIZEMOTOR_ZONE;
 
 
-typedef struct
-{
+typedef struct {
     char descrpition[24];
     MOTORHEAD head;
     SIZEMOTORPARAM param[8];
@@ -179,8 +175,7 @@ typedef struct
 
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 qi_feed[3];
     char unknow[4];
     uint16 qf_feed[3];
@@ -188,8 +183,7 @@ __packed typedef struct
 }
 CO_SINKERMOTORPARAM;
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint32 size;
     unsigned int prev; //0x00000000
     char descrpition[24];
@@ -199,30 +193,26 @@ __packed typedef struct
 CO_SINKERMOTOR_ZONE;
 
 
-typedef struct
-{
+typedef struct {
     uint32 qi_feed;
     uint32 qf_feed;
     int32 acc;
 }SINKERMOTORPARAM;
 
-typedef struct
-{
+typedef struct {
     char descrpition[24];
     MOTORHEAD head;
     SINKERMOTORPARAM param[8];
 }SINKERMOTOR_ZONE;
 
-typedef struct
-{
+typedef struct {
     uint16 tr1[3];
     char unknow[4];
     uint16 _tr1[3];
     char unknow1[4];
 }STITCHCAMSPARAM;
 
-typedef struct
-{
+typedef struct {
     uint32 size;
     unsigned int prev; //0x00000000
     char descrpition[24];
@@ -233,8 +223,7 @@ typedef struct
 
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint32 step;
     uint32 rpm[2];
     uint16 ramp[8][2];
@@ -243,8 +232,7 @@ CO_SPEED;
 
 
 
-typedef struct
-{
+typedef struct {
     int32 step;
     //int32 prerpm[8];
     //int32 acc[8];
@@ -255,18 +243,17 @@ typedef struct
 }SPEED;
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 angular;
     uint16 value;
     uint16 funcode;
     uint8 add[4];
-}CO_FUNC;
+}
+CO_FUNC;
 
 
 
-typedef struct
-{
+typedef struct {
     uint16 angular;
     uint16 value;
     uint16 funcode;
@@ -277,8 +264,7 @@ typedef struct
 
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 ryoyo;
     uint16 zyoyo;
     uint16 yyoyo;
@@ -288,8 +274,7 @@ __packed typedef struct
 MOTOR_HEADER_PARAM;
 
 
-typedef struct
-{
+typedef struct {
     uint16 angular;
     uint16 dummy;
     uint16 funcode;
@@ -297,8 +282,7 @@ typedef struct
 }CO_FENGMEN;
 
 
-typedef struct
-{
+typedef struct {
     uint16 angular;
     uint16 dummy;
     uint16 funcode;
@@ -308,8 +292,7 @@ typedef struct
 
 
 
-__packed typedef struct
-{
+__packed typedef struct {
     uint16 begin;
     uint16 end;
     uint16 economize[8][2];
@@ -317,8 +300,7 @@ __packed typedef struct
 CO_ECONOMIZER_PARAM;
 
 
-typedef struct
-{
+typedef struct {
     uint16 begin;
     uint16 end;
     uint16 economize[8];
@@ -327,11 +309,11 @@ typedef struct
 
 
 
-__packed typedef struct{
+__packed typedef struct {
     uint32 flag;
     uint32 unkown;
-    char   headmppctrl;
-    char   dummy[3];
+    char headmppctrl;
+    char dummy[3];
     uint32 unkown1[4];
     uint32 filedescOffset;
     uint32 weltAddrOffset;
@@ -339,15 +321,17 @@ __packed typedef struct{
     uint32 unkown3;
     uint32 supesize;
     char unkown4[16];
-}CO_SUPE_INFO;
+}
+CO_SUPE_INFO;
 
 
 
-__packed typedef struct{
+__packed typedef struct {
     uint16 weltflag;
     uint16 unknow;
     uint16 step;
-}CO_WELT_PARAM ;
+}
+CO_WELT_PARAM;
 
 typedef struct {
     uint16 weltinstep;
@@ -356,18 +340,25 @@ typedef struct {
 }WELT_PARAM;
 
 
+#define CO_RUN_FILENAME(CO_RUN)  ((CO_RUN)->co->filename);
+
+
 typedef struct __S_CO_RUN S_CO_RUN;
 
-typedef struct
-{
+typedef struct {
+#if _LFN_UNICODE ==1
+    wchar filename[64];
+#else
+    char filename[16];
+#endif
     CO_HEADER head;
     uint32 diameter;
     uint16 niddle;
     uint32 numofstep;
 
     CO_RESET_INFO resetinfo;
-    CO_CATE_INFO  cateinfo;
-    CO_SUPE_INFO  supeinfo;
+    CO_CATE_INFO cateinfo;
+    CO_SUPE_INFO supeinfo;
 
     uint32 numofsizemotorzone;
     SIZEMOTOR_ZONE sizemotor[30];
@@ -390,8 +381,8 @@ typedef struct
 
 
 
-typedef struct
-{
+typedef struct {
+    uint32 istep;
     uint32 ilinetag[8];
     //uint32 ilineEtag[8];
     uint16 econoFlag;
@@ -410,13 +401,13 @@ typedef struct
 }S_CO_RUN_STEP;
 
 
-
-#define ECONO_BEGIN   2
-#define ECONO_END     4
-#define IS_ECONO_BEGIN(A)   ((A).econoFlag & ECONO_BEGIN)
-#define IS_ECONO_END(A)   ((A).econoFlag & ECONO_END)
-#define IS_ECONO_BEGIN_END(A)  (((A).econoFlag & ECONO_END)&&((A).econoFlag & ECONO_BEGIN))
-
+#define ECONO_INECONO 1
+#define ECONO_BEGIN   3
+#define ECONO_END     5
+#define IS_ECONO_BEGIN(A)   (((A).econoFlag & ECONO_BEGIN)==ECONO_BEGIN)
+#define IS_ECONO_END(A)   (((A).econoFlag & ECONO_END)==ECONO_END)
+#define IS_ECONO_BEGIN_END(A)  (((A).econoFlag & (ECONO_END | ECONO_END))==(ECONO_END | ECONO_END))
+#define IS_ECONO_INECONO(A)   ((A).econoFlag & ECONO_INECONO)
 
 
 typedef struct {
@@ -425,36 +416,40 @@ typedef struct {
 }ACT_GROUP;
 
 
-typedef struct{
+typedef struct {
     uint16 num;
     uint16 alarmcode[10];
 }ALARM_GROUP;
 
 
-typedef struct __S_CO_RUN
-{
-    int32 istep;                   //step conter when run;
-    uint32 nextline;                //下一行
-    int32 nextstep;                //nextstep != istep+1, due to economizer
-    int32 prestep;
 
-    uint16 prerpm;
-    int32 rpm;
-    int16 speedAcc;                 //speed acceleration when run
-    uint16 targetSpeed;             //target speed when ramp
+typedef struct __S_CO_RUN {
+    //  int32 istep;                   //step conter when run;
+    //  uint32 nextline;                //下一行
+    //  int32 nextstep;                //nextstep != istep+1, due to economizer
+    //  int32 prestep;
 
-    bool welt;                      //is_or_not in welt flag
+    //int16 speedAcc;                 //speed acceleration when run
+    //uint16 targetSpeed;             //target speed when ramp
 
-    uint32 sizemotor;
-    uint32 sinkmotor1_3;
-    uint32 sinkmotor2_4;
-   // FENGMEN *fengmen[360];
+    //bool welt;                      //is_or_not in welt flag
 
-    uint16 iecono;                  //current economizer counter
-    uint16 econonum;                //economizer
-    uint16 econostepfrom;           //economizer begin step
-    uint16 econostepto;             //economizer end step(end>begin)
-                                    //
+    //int32 sizemotor;
+    // int32 stepSizemotorBase;
+    //int32 stepSizemotorAcc;
+    //int32 sinkmotor1_3;
+    //int32 stepSinkermotor1_3Base;
+    //int32 stepsinkermotor1_3Acc;
+    //int32 sinkmotor2_4;
+    //int32 stepsinkermotor2_4Base;
+    //int32 stepsinkermotor2_4Acc;
+    // FENGMEN *fengmen[360];
+
+    //uint16 iecono;                  //current economizer counter ,begin from 1
+    //uint16 econonum;                //economizer
+    //uint16 econostepfrom;           //economizer begin step
+    // uint16 econostepto;             //economizer end step(end>begin)
+    //
     uint16 numofline[8];            //number of line ,>=numofstep due to economizer   总圈数
     uint16 numofstep;               //number offset step ,equal to CO::numofstep		总步数
     S_CO *co;                         //poit to associated co
@@ -467,14 +462,27 @@ typedef struct __S_CO_RUN
 #define LINE_FLAG_ACT 0x02
 
 
-typedef struct
-{
-    uint16 istep;                    //当前STEP
-    uint32 iline;                    //实际当前圈数
+typedef struct {
+    S_CO_RUN *co_run;
+
+    int16 istep;                    //当前STEP
+    int32 nextstep;                //nextstep != istep+1, due to economizer
+
+    int32 iline;                    //实际当前圈数
+    int32 nextline;                //下一行
+
+
+    uint16 prerpm;
+    int32 rpm;                    //当前圈设定速度
+    int16 speedAcc;
+    uint16 targetSpeed;             //target speed when ramp
 
     bool welt;                      //flag is_or_not in welt;
 
+    bool isStepEcono;
+
     uint16 iecono;                   //当前循环
+    uint16 ieconodisplay;
     uint16 econobegin;              //当前循环首,如果没有循环为0
     uint16 econoend;                //当前循环尾,如果没有循环为0
     uint16 econonum;                 //当前循环总共循环
@@ -484,13 +492,22 @@ typedef struct
     ALARM_GROUP alarm[360];
     FENGMEN *fengmen[360];
 
-    uint16 rpm;                        //当前圈设定速度
     char *zonename;
     uint16 zonebegin;
     uint16 zoneend;
+
     uint32 sizemotor;                 //步进电机值
+    int32 stepSizemotorBase;
+    int32 stepSizemotorAcc;
+
     uint32 sinkmotor1_3;               //sinker motor
+    int32 stepSinkermotor1_3Base;
+    int32 stepsinkermotor1_3Acc;
+
     uint32 sinkmotor2_4;
+    int32 stepSinkermotor2_4Base;
+    int32 stepsinkermotor2_4Acc;
+
     uint32 flag;
 }S_CO_RUN_LINE;
 
@@ -501,7 +518,7 @@ typedef struct {
 }S_CN_GROUP;
 
 
-__packed typedef  struct {
+__packed typedef struct {
     char co[12];
     short unknow;
     uint32 product;
@@ -522,20 +539,20 @@ CN_GROUP;
 //==============================================================================
 //================================================================================
 extern void coInit();
-extern bool coMd5(const TCHAR *path,void *md5,int md5len);
+extern bool coMd5(const TCHAR *path, void *md5, int md5len);
 extern int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset);
 extern int32 coSave(S_CO *co, TCHAR *path);
 extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
-extern uint32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
+extern int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size);
 extern void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
-extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
+extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size);
 //extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
-extern void corunReset(S_CO_RUN *co_run);
+extern void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line);
 extern void coRelease(S_CO *co);
 
-extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co,unsigned int num);
+extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co, unsigned int num);
 extern int cnParse(const TCHAR *path, S_CN_GROUP *val);
 
 #endif

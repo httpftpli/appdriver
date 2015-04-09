@@ -22,7 +22,7 @@
 #define CAN_WP_FUNCODE_QF_ALARM         			0x2b		//气阀报警(气阀板主动上发)
 
 
-#define QIFA_ID(ID)    (CAN_WP_DEV_TYPE_QIFA|ID)
+#define QIFA_ID(ID)    (CAN_WP_ID(CAN_WP_DEV_TYPE_QIFA,ID))
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 static atomic wp_read_qf_flag,wp_qf_resdata;
 static unsigned short Sw_Qf_Status;

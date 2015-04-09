@@ -6,17 +6,16 @@
 #include "atomic.h"
 
 
-#define CAN_WP_DEV_TYPE_MAIN    0x10
-#define CAN_WP_DEV_TYPE_MOTOR   0x20
-#define CAN_WP_DEV_TYPE_INPUT   0x30
-#define CAN_WP_DEV_TYPE_QIFA    0x40
-#define CAN_WP_DEV_TYPE_SIFU    0x50
+#define CAN_WP_DEV_TYPE_MAIN    0x01
+#define CAN_WP_DEV_TYPE_MOTOR   0x02
+#define CAN_WP_DEV_TYPE_INPUT   0x03
+#define CAN_WP_DEV_TYPE_QIFA    0x04
+#define CAN_WP_DEV_TYPE_SIFU    0x05
 
 
 #define CAN_WP_FUNCODE_HEARDBEAT           0xfe
 
-
-//motor
+/*//motor
 #define CAN_WP_FUNCODE_MOTOR_POWERSAVE     0x21
 #define CAN_WP_FUNCODE_MOTOR_EN            0x22
 #define CAN_WP_FUNCODE_MOTOR_RESET         0x23
@@ -40,13 +39,13 @@
 #define CAN_WP_FUNCODE_SR_SETALARMMASK  0x27
 #define CAN_WP_FUNCODE_SR_READALARM     0x28
 #define CAN_WP_FUNCODE_SR_READ          0x29
-#define CAN_WP_FUNCODE_SR_ALARM         0x2b
+#define CAN_WP_FUNCODE_SR_ALARM         0x2b*/
 
 
 typedef struct {
-    unsigned int funcode:12;
-    unsigned int srcid:8;
-    unsigned int desid:8;
+    unsigned int funcode:8;
+    unsigned int srcid:10;
+    unsigned int desid:10;
     unsigned int flag:1;
     unsigned int candir:1;
     unsigned int xtd:1;
@@ -54,15 +53,15 @@ typedef struct {
     unsigned int data[2];
 }CAN_WP;
 
-
-#define ID_MASK  (unsigned char)0xf0
-#define ID_GROUP_BROADCAST(id) (id | ~ID_MASK)
-#define ID_ALL_BROADCAST 0xff
+#define CAN_WP_GET_TYPE(ID) ((ID)>>6)
+#define CAN_WP_ID(TYPE,id) ((TYPE)<<6 | (id))
+#define CAN_WP_ID_GROUP_BROADCAST(id) CAN_WP_ID(0x0f,(id))
+#define CAN_WP_ID_ALL_BROADCAST 0xff
 
 
 
 #define DEFINE_CAN_WP_FRAME(frame) CAN_WP frame =  \
-              {.flag = 1,.candir =0,.xtd=1,.srcid=0x11}
+              {.flag = 1,.candir =0,.xtd=1,.srcid=CAN_WP_ID(1,1)}
 
 
 extern bool wpHeartBeat(unsigned char id, unsigned int timeout,atomic *flag);

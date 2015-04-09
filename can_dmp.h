@@ -22,10 +22,13 @@
 #define DMP_DEV_DEV_ONLINEMASK       0xff00UL
 
 
-#define DMP_DEV_HDTYPE_SBJ    'S'|'B'<<8|'J'<<16
-#define DMP_DEV_HDTYPE_SSF    'S'|'S'<<8|'F'<<16
-#define DMP_DEV_HDTYPE_SSR    'S'|'I'<<8|'N'<<16
-#define DMP_DEV_HDTYPE_SSC    'S'|'Q'<<8|'F'<<16
+#define DMP_DEV_HDTYPE_SBJ    ('S'|'B'<<8|'J'<<16)
+#define DMP_DEV_HDTYPE_SSF    ('S'|'S'<<8|'F'<<16)
+#define DMP_DEV_HDTYPE_SSR    ('S'|'I'<<8|'N'<<16)
+#define DMP_DEV_HDTYPE_SSC    ('S'|'Q'<<8|'F'<<16)
+
+#define DMP_DEV_HDTYPE_SMD    ('S'|'M'<<8|'D'<<16)   //主板
+
 
 
 #define DEV_COMP_DIFUID
@@ -39,17 +42,16 @@
 
 typedef struct slave_dev {
     unsigned int stat;
-    unsigned int hdtype;
-    unsigned char inboot;
-    unsigned char hdver;
+    unsigned int hdtype;    //硬件类型
+    unsigned char inboot;   //是否在boot
+    unsigned char hdver;    //硬件版本
     unsigned char customcode;
     unsigned char rombigver;
     unsigned short rommidver;
     unsigned short romlitver;
-    unsigned int romtime;
-    unsigned int uid;
-    unsigned char workid;
-    unsigned char dummy1;
+    unsigned int romtime;   //时间 time_t
+    unsigned int uid;       //唯一 id
+    unsigned short workid;  //工作id
     unsigned short dummy2;
     struct list_head list;
     int ipacket;
@@ -57,6 +59,11 @@ typedef struct slave_dev {
 }DMP_DEV;
 
 
+
+typedef struct {
+    uint32 num;
+    DMP_DEV devs[16];
+}DMP_IAP_HELPER;
 
 
 typedef struct uid_id_{
@@ -129,7 +136,7 @@ typedef struct dev_compare_ {
 
 
 static inline unsigned int dmpIdType(unsigned int devTypeIndex){
-    return (devTypeIndex+2)<<4;
+    return (devTypeIndex+2)<<6;
 }
 
 static inline bool isDevOnline(DMP_DEV *dev){
@@ -149,10 +156,13 @@ static inline bool isDmpFrameRcv(CAN_DMP *frame) {
     return false;
 }
 
+extern int CanDmp_Return;
+
 extern void dmpInit();
 extern bool dmpAutoPreRegester(unsigned int devTypeIndex,unsigned int *id,DMP_DEV **newadddev);
 extern void praseDevList(CAN_DMP *frame, struct list_head *devlist);
 extern void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist);
+extern void dmpIapHelper(DMP_IAP_HELPER *helper,uint32 num);
 extern void dmpSysStore();
 extern bool dmpCheckDev();
 extern bool dmpSysSave();
@@ -172,10 +182,19 @@ extern void dmpUnregesterOffline(unsigned int devTypeIndex);
 extern bool dmpWillUnReg(unsigned int devTypeIndex) ;
 extern unsigned int dmpSysWillRegCnt(unsigned int typeindex);
 extern void dmpCanRdDevVer(unsigned int uid);
-extern bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout);
+//extern bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout);
 extern bool dmpCanPreSetId(unsigned int devUid,bool val, unsigned int timeout);
-extern bool dmpCanSetId(unsigned int devUid, unsigned char id, unsigned int timeout);
+extern bool dmpCanSetId(unsigned int devUid, unsigned short id, unsigned int timeout);
 extern bool dmpCanRcv(CAN_DMP *frame);
-extern bool dmpCanReadId(unsigned int devUid, unsigned char *id, unsigned int timeoutms);
+extern bool dmpCanReadId(unsigned int devUid, unsigned short *id, unsigned int timeoutms);
+extern bool praseDev(const char *desc, DMP_DEV *dev);
 
+
+
+
+extern bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout);
+extern bool dmpCanJumpToApp(unsigned int devUid, unsigned int timeout);
+extern bool dmpCanBootEraseApp(unsigned int devUid,unsigned int max_baohao,unsigned int timeout);
+extern bool dmpCanProgramDate(unsigned int devUid,unsigned int baohao,unsigned char count,unsigned char *val,unsigned int timeout);
+extern bool dmpCanProgramEnd(unsigned int devUid,unsigned int timeout);
 #endif /*__CAN__DMP__H__*/
