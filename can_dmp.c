@@ -364,9 +364,10 @@ bool dmpHaveOffline(unsigned int devTypeIndex) {
         }
     } else {
         for (int i = 0; i < 4; i++) {
-            dmpSysDevCnt(devTypeIndex, &reg, &offline, &newadd, &unknow);
+            dmpSysDevCnt(i, &reg, &offline, &newadd, &unknow);
             if (offline > 0) {
                 fg_offline = true;
+                break;
             }
         }
 
@@ -487,6 +488,7 @@ bool dmpAutoRegester(unsigned int devTypeIndex) {
         return r;
     }
     devn->stat |= DMP_DEV_DEV_ONLINEMASK;
+    devn->workid = id;
     //list_sort_insert(&devn->list, &dmpSys.dev[devTypeIndex].regester,candmpsort);
     list_move_tail(&devn->list, &dmpSys.dev[devTypeIndex].regester);
     dmpDevDataClear(devr);
