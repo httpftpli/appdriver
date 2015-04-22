@@ -167,33 +167,46 @@ static void readSpeed(uint8 *speedbuf, struct list_head *speed) {
 }
 
 
-void readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
+bool readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
     *step = *(uint32 *)funcaddr / 4;
     for (int i = 0; i < *step; i++) {
-        unsigned int addr = ((uint32 *)funcaddr)[i];
+        uint32 addr = ((uint32 *)funcaddr)[i];
+        uint32 addrnext = ((uint32 *)funcaddr)[i + 1];
         //read func;
+        uint32 addradd;
         while (1) {
             FUNC *func = list_first_entry(&funcfreelist, FUNC, list);
             CO_FUNC *cofunc = (CO_FUNC *)(funcaddr + addr);
             if (cofunc->angular != 0x8000) {
                 ASSERT(cofunc->angular < 360);
                 addr += 6;
-                if (cofunc->funcode == 0x031f) {
-                    addr += 4;
+                if ((cofunc->funcode == 0x031f) || (cofunc->funcode == 0x011f)) {
+                    addradd = 4;
                 } else if (cofunc->funcode == 0x030b) {
-                    addr += 2;
+                    addradd = 2;
+                } else {
+                    addradd = 0;
                 }
+                addr += addradd;
                 func->angular = cofunc->angular;
                 func->value = cofunc->value;
                 func->funcode = cofunc->funcode;
                 func->funcode = cofunc->funcode;
-                *(uint32 *)func->add = *(uint32 *)cofunc->add;
+                if (addradd == 2) {
+                    *(uint32 *)func->add = *(short *)cofunc->add;
+                } else if (addradd == 2) {
+                    *(uint32 *)func->add = *(uint32 *)cofunc->add;
+                }
                 list_move_tail(&func->list, &funclist[i]);
             } else {
+                if ((i != *step - 1) &&  (addrnext != addr+2)) { //is not last step
+                    return false;
+                }
                 break;
             }
         }
     }
+    return true;
 }
 
 
@@ -325,7 +338,7 @@ static void co_read_yarn(S_CO *co, uint8 yarnpartbuf[]) {
     }*/
 }
 
-static void co_read_cate(S_CO *co, uint8 catepartbuf[]) {
+static bool co_read_cate(S_CO *co, uint8 catepartbuf[]) {
     CO_CATE_INFO *info = (CO_CATE_INFO *)catepartbuf;
 
     memcpy(&co->cateinfo, info, sizeof*info);
@@ -333,8 +346,9 @@ static void co_read_cate(S_CO *co, uint8 catepartbuf[]) {
     readSpeed(catepartbuf + info->speed_addr, &co->speed);
 
     unsigned int step;
-    readFunc(catepartbuf + info->func_addr, co->func, &step);
+    bool r = readFunc(catepartbuf + info->func_addr, co->func, &step);
     co->numofstep = step;
+    return r;
 }
 
 static bool co_read_mpp(S_CO *co, uint8 mpppartbuf[]) {
@@ -514,7 +528,10 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-    co_read_cate(co, cofilebuf);
+    if (!co_read_cate(co, cofilebuf)) {
+        re = CO_FILE_PARSE_ERROR;
+        goto ERROR;
+    }
 
     //READ CO MPP SECTION(section 3)
     f_lseek(&file, co->head.sec[3].offset << 8);
@@ -549,8 +566,10 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     return re;
 
     ERROR:
-    *offset = (uint32)f_tell(&file);
-    f_close(&file);
+    if (offset != NULL) {
+        *offset = (uint32)f_tell(&file);
+    }
+    f_close(&file); 
     return re;
 }
 
@@ -727,7 +746,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
 static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
     SPEED *speed;
     speed = list_first_entry_or_null(&co->speed, SPEED, list);
-    if (speed==NULL || speed->step != 0) {
+    if (speed == NULL || speed->step != 0) {
         speed = list_first_entry(&speedfreelist, SPEED, list);
         speed->step = 0;
         speed->rpm = 50;
@@ -786,6 +805,9 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
         for (int i = 0; i < co->numofstep; i++) {
             co_run->stepptr[i]->econo = NULL;
             co_run->stepptr[i]->econoFlag = 0;
+            for (int j=0;j<8;j++) {
+                co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i]->istep;
+            }
         }
         return;
     }
@@ -1546,8 +1568,8 @@ static uint16 hafuzhencode2Valvecode(uint16 funcval) {
 }
 
 
-static uint16 common0506func2Valvecode(uint16 funcval){
-    return COMM_FUNC_BASE + funcval | 1<<12;
+static uint16 common0506func2Valvecode(uint16 funcval) {
+    return COMM_FUNC_BASE + funcval | 1 << 12;
 }
 
 
@@ -1556,7 +1578,7 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
         { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}},
         { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}},
-        { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff},  { 0, 113, 293}},
+        { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}},
         { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
     };
 
@@ -1566,7 +1588,7 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     uint32 feed = fun->value / 9;
 
     *num = 0;
-    if (caminoutmap[feed][sxt][pos_ace]==0xffff) {
+    if (caminoutmap[feed][sxt][pos_ace] == 0xffff) {
         //TODO guide
         return;
     }
@@ -1579,7 +1601,7 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
             valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan out
             valvecode[1] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban out
             *num = 2;
-        }else{
+        } else {
             //TODO GUIDE
         }
         break;
@@ -1598,7 +1620,7 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
             valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban in
             valvecode[1] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan in
             *num = 2;
-        }else{
+        } else {
             //TODO GUIDE
         }
         break;
@@ -1622,13 +1644,19 @@ static uint16 misc0203code2Valvecode(uint16 codevalue) {
     int16 inorout;
     int16 ivalve;
     int16 re = 0xffff;
-    if ((codevalue <= 0x47) || (codevalue >= 0x98 && codevalue <= 0xa9) 
-        ||(codevalue >= 0xb4 && codevalue <= 0xc3)) {
+    if ((codevalue <= 0x47) || (codevalue >= 0x98 && codevalue <= 0xa9)
+        || (codevalue >= 0xb4 && codevalue <= 0xc3)) {
         inorout = !(codevalue % 2) << 12;
         ivalve = codevalue >> 1;
         re = inorout | ivalve + VALVE_MIS_BASE;
     }
     return re;
+}
+
+static uint16 misc0306code2Valvecode(uint16 codevalue) {
+    uint16 inorout = !(codevalue % 2) << 12;
+    uint16 ivalve = codevalue >> 1;
+    return inorout | ivalve + VALVE_0603_BASE;
 }
 
 static uint16 funcode2Alarm(FUNC *func, uint32 *flag) {
@@ -1690,13 +1718,18 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
             *valnum = 1;
         } else {
             *valvecode = misc0203code2Valvecode(fun->value);
-            if (*valvecode!=0xffff) {
+            if (*valvecode != 0xffff) {
                 *valnum = 1;
-            }else{
+            } else {
                 //TODO GUIDING
             }
         }
         break;
+    case 0x0306:
+        *valvecode = misc0306code2Valvecode(fun->value);
+        *valnum = 1;
+        break;
+
     case 0x0305:  //cam
         camcode2Valvecode(fun, valvecode, valnum);
         if (*valnum != 0) {
