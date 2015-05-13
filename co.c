@@ -8,10 +8,13 @@
 #include "algorithm.h"
 #include "debug.h"
 #include <wchar.h>
+#include "ff_ext.h"
+#include <stdlib.h>
 
 
 
 #define MOTOR_SCALE   1
+#define FILEPATH  L"1:\\"
 
 
 
@@ -29,6 +32,9 @@ static struct list_head runstepfreelist;
 
 static WELT_PARAM __welt_param_pool[50];
 static struct list_head welt_param_freelist;
+
+static BTSR __btsr_pool[10];
+static struct list_head btsr_freelist;
 
 static unsigned char cofilebuf[1024 * 2048];
 
@@ -68,6 +74,8 @@ void coInit() {
     INIT_LIST_HEAD(&runstepfreelist);
     INIT_LIST_HEAD(&welt_param_freelist);
     INIT_LIST_HEAD(&speedfreelist);
+    INIT_LIST_HEAD(&btsr_freelist);
+
     for (int i = 0; i < lenthof(__func); i++) {
         list_add_tail(&__func[i].list, &funcfreelist);
     }
@@ -83,6 +91,10 @@ void coInit() {
     for (int i = 0; i < lenthof(__speed); i++) {
         list_add_tail(&__speed[i].list, &speedfreelist);
     }
+    for (int i = 0; i < lenthof(__btsr_pool); i++) {
+        list_add_tail(&__btsr_pool[i].list, &btsr_freelist);
+    }
+
 }
 
 
@@ -199,7 +211,7 @@ bool readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
                 }
                 list_move_tail(&func->list, &funclist[i]);
             } else {
-                if ((i != *step - 1) &&  (addrnext != addr+2)) { //is not last step
+                if ((i != *step - 1) && (addrnext != addr + 2)) { //is not last step
                     return false;
                 }
                 break;
@@ -448,10 +460,8 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 }
 
 
-
 int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
-    FILINFO fileinfo;
     unsigned int br;
     int32 re = 0;
 
@@ -469,16 +479,11 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FRESULT r = f_open(&file, path, FA_READ);
     if (r != FR_OK) {
         re = CO_FILE_READ_ERROR;
-        return false;
+        return re;
     }
-#if 0
-#if _LFN_UNICODE ==1
-    wcsncpy(co->filename, fileinfo.lfname, 63);
-#else
-    strcpy(co->filename, fileinfo.fname);
-#endif
 
-#endif
+    wpathTowfilename(co->filename, path);
+
     //READ CO HEAD
     r = f_read(&file, &co->head, sizeof(CO_HEADER), &br);
     if (r != FR_OK || br != sizeof(CO_HEADER)) {
@@ -569,7 +574,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     if (offset != NULL) {
         *offset = (uint32)f_tell(&file);
     }
-    f_close(&file); 
+    f_close(&file);
     return re;
 }
 
@@ -620,6 +625,16 @@ void coRelease(S_CO *co) {
             list_del(p);
             memset(step, 0, sizeof*step);
             list_add(p, &runstepfreelist);
+        }
+        //release btsr
+        if (run->btsr != NULL) {
+            BTSR *btsr = run->btsr;
+            if (btsr->data != NULL) {
+                free(btsr->data);
+            }
+            memset(btsr, 0, sizeof*btsr);
+            list_add(&btsr->list, &btsr_freelist);
+            run->btsr = NULL;
         }
         memset(run, 0, sizeof*run);
     }
@@ -805,7 +820,7 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
         for (int i = 0; i < co->numofstep; i++) {
             co_run->stepptr[i]->econo = NULL;
             co_run->stepptr[i]->econoFlag = 0;
-            for (int j=0;j<8;j++) {
+            for (int j = 0; j < 8; j++) {
                 co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i]->istep;
             }
         }
@@ -942,9 +957,126 @@ static void cocreateindex_welt(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
+static bool coinitbtsr(S_CO_RUN *co_run) {
+    S_CO *co = co_run->co;
+    wchar_t btsrfilepath[200];
+    wcscpy(btsrfilepath, FILEPATH);
+    wcscat(btsrfilepath, co->filename);
+    fileFixNameReplace(btsrfilepath, L".btr");
+    FIL btsrfile;
+    BTSR *btsr = NULL;
+    uint32 br;
+    if (f_open(&btsrfile, btsrfilepath, FA_READ | FA_OPEN_EXISTING) != FR_OK) {
+        return false;
+    }
+    btsr = list_first_entry(&btsr_freelist, BTSR, list);
+    list_del(&btsr->list);
+    if (FR_OK != f_read(&btsrfile, btsr, sizeof*btsr,&br) || br != sizeof*btsr) {
+        goto ERROR;
+    }
+    if (btsr->coCheck != co->head.coCheck) {
+        goto ERROR;
+    }
+    if (FR_OK != f_lseek(&btsrfile, (uint32)(btsr->data))) {
+        goto ERROR;
+    }
+    btsr->data = (char *)malloc(btsr->sizeofdata);
+    if (FR_OK != f_read(&btsrfile, btsr->data, btsr->sizeofdata, &br) || br != btsr->sizeofdata) {
+        goto ERROR;
+    }
+    co_run->btsr = btsr;
+    f_close(&btsrfile);
+    return true;
+    ERROR:
+    f_close(&btsrfile);
+    f_unlink(btsrfilepath);
+    if (btsr != NULL) {
+        if (btsr->data != NULL) {
+            free(btsr->data);
+        }
+        memset(btsr, sizeof*btsr,0);
+        list_add(&btsr->list, &btsr_freelist);
+    }
+    co_run->btsr = NULL;
+    return false;
+}
 
-void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
+
+void coRunBtsrBeginStudy(S_CO_RUN *co_run, int numofpoint, int numofbtsr,int co_size) {
+    S_CO *co = co_run->co;
+    BTSR *cobtsr = NULL;
+    int datasize = numofpoint * numofbtsr * co_run->numofline[co_size];
+    if (co_run->btsr != NULL) {
+        cobtsr = co_run->btsr;
+        if (datasize > cobtsr->sizeofdata) {
+            free(cobtsr->data);
+            cobtsr->data = (char *)malloc(datasize);
+        }
+    } else {
+        cobtsr = list_first_entry(&btsr_freelist, BTSR, list);
+        list_del(&cobtsr->list);
+        cobtsr->data = (char *)malloc(datasize);
+        co_run->btsr = cobtsr;
+    }
+    cobtsr->coCheck = co->head.coCheck;
+    cobtsr->num = numofbtsr;
+    cobtsr->numofline = co->run->numofline[co_size];
+    cobtsr->sizeofdata = numofpoint * numofbtsr * co_run->numofline[co_size];
+    cobtsr->point = numofpoint;
+    cobtsr->datapointer = 0;
+}
+
+
+void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size){
+    if (co_run->btsr && co_run->btsr->data) {
+        uint32 offset = co_run->btsr->datapointer;
+        memcpy(co_run->btsr->data + offset,buf,size);
+        co_run->btsr->datapointer += size;
+    }
+}
+
+
+BOOL coRunBtsrSave(S_CO_RUN *co_run) {
+    if (co_run->btsr == NULL) {
+        return false;
+    }
+    S_CO *co = co_run->co;
+    wchar_t btsrfilepath[200];
+    wcscpy(btsrfilepath, FILEPATH);
+    wcscat(btsrfilepath, co->filename);
+    fileFixNameReplace(btsrfilepath, L".btr");
+    FIL btsrfile;
+    if (f_open(&btsrfile, btsrfilepath, FA_CREATE_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
+        return false;
+    }
+    uint32 wr;
+    BTSR btemp;
+    btemp = *co_run->btsr;
+    btemp.data = (char *)128;
+    btemp.datapointer = 0;
+
+    if (FR_OK != f_write(&btsrfile, &btemp, sizeof btemp,&wr) || wr != sizeof btemp) {
+        goto ERROR;
+    }
+    f_lseek(&btsrfile, 128);
+    if (FR_OK != f_write(&btsrfile, co_run->btsr->data, co_run->btsr->sizeofdata, &wr) || wr != co_run->btsr->sizeofdata) {
+        goto ERROR;
+    }
+    f_close(&btsrfile);
+    return true;
+    ERROR:
+    f_close(&btsrfile);
+    f_unlink(btsrfilepath);
+    return false;
+}
+
+
+
+
+uint32 coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
+    uint32 flag = 0;
     INIT_LIST_HEAD(&co_run->step);
+    co_run->btsr = NULL;
     //create index and list
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = list_entry(runstepfreelist.next, S_CO_RUN_STEP, list);
@@ -970,10 +1102,11 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     //fengmen
     cocreateindex_fengmen(co_run, co);
 
-
     co_run->numofstep = co->numofstep;
     co->run = co_run;
     co_run->co = co;
+    flag |= coinitbtsr(co_run)<<8;
+    return flag;
 }
 
 
@@ -1576,10 +1709,7 @@ static uint16 common0506func2Valvecode(uint16 funcval) {
 
 static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
-        { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}},
-        { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}},
-        { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}},
-        { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
+      {{ 0, 293, 113},{ 0xffff, 0xffff, 0xffff},{ 0, 293, 113}},{{ 0, 23, 203},{ 0, 23, 23},{ 0, 23, 203}},{{ 0, 113, 293},{ 0xffff, 0xffff, 0xffff},{ 0, 113, 293}},{{ 0, 203, 23},{ 0, 203, 203},{ 0, 203, 23}},
     };
 
     bool in = false;
@@ -1744,6 +1874,7 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         break;
     }
 }
+
 
 
 
