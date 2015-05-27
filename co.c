@@ -568,6 +568,7 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     co_read_supe(co, cofilebuf);
 
     f_close(&file);
+    co->parsed = true;
     return re;
 
     ERROR:
@@ -575,11 +576,15 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         *offset = (uint32)f_tell(&file);
     }
     f_close(&file);
+    co->parsed = false;
     return re;
 }
 
 
 void coRelease(S_CO *co) {
+    if (!co->parsed) {
+        return;
+    }
     struct list_head *p,*n;
     list_for_each_safe(p, n, &co->speed) {
         SPEED *speed = list_entry(p, SPEED, list);
@@ -957,67 +962,63 @@ static void cocreateindex_welt(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
-static bool coinitbtsr(S_CO_RUN *co_run) {
+void coRunInitBtsr(S_CO_RUN *co_run, int numofbtsr, int numofpoint, int co_size, bool *havematchbtsrfile) {
     S_CO *co = co_run->co;
     wchar_t btsrfilepath[200];
     wcscpy(btsrfilepath, FILEPATH);
     wcscat(btsrfilepath, co->filename);
     fileFixNameReplace(btsrfilepath, L".btr");
-    FIL btsrfile;
-    BTSR *btsr = NULL;
-    uint32 br;
-    if (f_open(&btsrfile, btsrfilepath, FA_READ | FA_OPEN_EXISTING) != FR_OK) {
-        return false;
-    }
-    btsr = list_first_entry(&btsr_freelist, BTSR, list);
-    list_del(&btsr->list);
-    if (FR_OK != f_read(&btsrfile, btsr, sizeof*btsr,&br) || br != sizeof*btsr) {
-        goto ERROR;
-    }
-    if (btsr->coCheck != co->head.coCheck) {
-        goto ERROR;
-    }
-    if (FR_OK != f_lseek(&btsrfile, (uint32)(btsr->data))) {
-        goto ERROR;
-    }
-    btsr->data = (char *)malloc(btsr->sizeofdata);
-    if (FR_OK != f_read(&btsrfile, btsr->data, btsr->sizeofdata, &br) || br != btsr->sizeofdata) {
-        goto ERROR;
-    }
-    co_run->btsr = btsr;
-    f_close(&btsrfile);
-    return true;
-    ERROR:
-    f_close(&btsrfile);
-    f_unlink(btsrfilepath);
-    if (btsr != NULL) {
-        if (btsr->data != NULL) {
-            free(btsr->data);
-        }
-        memset(btsr, sizeof*btsr,0);
-        list_add(&btsr->list, &btsr_freelist);
-    }
-    co_run->btsr = NULL;
-    return false;
-}
-
-
-void coRunBtsrBeginStudy(S_CO_RUN *co_run, int numofpoint, int numofbtsr,int co_size) {
-    S_CO *co = co_run->co;
-    BTSR *cobtsr = NULL;
     int datasize = numofpoint * numofbtsr * co_run->numofline[co_size];
+    *havematchbtsrfile = false;
+    FIL btsrfile;
+    BTSR *cobtsr = NULL;
+    uint32 br;
+
+    //*isfindBtsrData = false;
+    if (co_size >= 8) {
+        return;
+    }
+    char *btsrdatatemp;
     if (co_run->btsr != NULL) {
         cobtsr = co_run->btsr;
         if (datasize > cobtsr->sizeofdata) {
             free(cobtsr->data);
-            cobtsr->data = (char *)malloc(datasize);
+            cobtsr->data = (char *)malloc(datasize + 256);
         }
     } else {
         cobtsr = list_first_entry(&btsr_freelist, BTSR, list);
         list_del(&cobtsr->list);
-        cobtsr->data = (char *)malloc(datasize);
+        cobtsr->data = (char *)malloc(datasize + 256);
         co_run->btsr = cobtsr;
     }
+    if (f_open(&btsrfile, btsrfilepath, FA_READ | FA_OPEN_EXISTING) != FR_OK) {
+        goto BTSR_FILE_NOTMATCH;
+    }
+    char *btsrdatabak = cobtsr->data;
+    if (FR_OK != f_read(&btsrfile, cobtsr, sizeof*cobtsr,&br) || br != sizeof*cobtsr) {
+        goto FILE_ERROR;
+    }
+    uint32 offset = (uint32)cobtsr->data;
+    cobtsr->data = btsrdatabak;
+    if (cobtsr->coCheck != co->head.coCheck ||
+        cobtsr->numofline != co_run->numofline[co_size] ||
+        cobtsr->num != numofbtsr ||
+        cobtsr->point != numofpoint) {
+        goto FILE_ERROR;
+    }
+    if (FR_OK != f_lseek(&btsrfile, offset)) {
+        goto FILE_ERROR;
+    }
+    if (FR_OK != f_read(&btsrfile, cobtsr->data, cobtsr->sizeofdata, &br) || br != cobtsr->sizeofdata) {
+        goto FILE_ERROR;
+    }
+    f_close(&btsrfile);
+    *havematchbtsrfile = true;
+    return;
+    FILE_ERROR:
+    f_close(&btsrfile);
+    f_unlink(btsrfilepath);
+    BTSR_FILE_NOTMATCH:
     cobtsr->coCheck = co->head.coCheck;
     cobtsr->num = numofbtsr;
     cobtsr->numofline = co->run->numofline[co_size];
@@ -1027,10 +1028,10 @@ void coRunBtsrBeginStudy(S_CO_RUN *co_run, int numofpoint, int numofbtsr,int co_
 }
 
 
-void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size){
+void coRunBtsrStudy(S_CO_RUN *co_run, void *buf, int size) {
     if (co_run->btsr && co_run->btsr->data) {
         uint32 offset = co_run->btsr->datapointer;
-        memcpy(co_run->btsr->data + offset,buf,size);
+        memcpy(co_run->btsr->data + offset, buf, size);
         co_run->btsr->datapointer += size;
     }
 }
@@ -1063,6 +1064,16 @@ BOOL coRunBtsrSave(S_CO_RUN *co_run) {
         goto ERROR;
     }
     f_close(&btsrfile);
+
+    //########################################################
+    //测试程序  保存完毕 拷贝到U盘文件
+    wchar_t despath[100];
+    wcscpy(despath, btsrfilepath);
+    despath[0] = L'2';
+    char cpbuf[1024];
+    f_copy(btsrfilepath, despath, cpbuf, sizeof cpbuf);
+    //#######################################################
+
     return true;
     ERROR:
     f_close(&btsrfile);
@@ -1073,8 +1084,11 @@ BOOL coRunBtsrSave(S_CO_RUN *co_run) {
 
 
 
-uint32 coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
+void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     uint32 flag = 0;
+    if (!co->parsed) {
+        return;
+    }
     INIT_LIST_HEAD(&co_run->step);
     co_run->btsr = NULL;
     //create index and list
@@ -1105,8 +1119,6 @@ uint32 coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     co_run->numofstep = co->numofstep;
     co->run = co_run;
     co_run->co = co;
-    flag |= coinitbtsr(co_run)<<8;
-    return flag;
 }
 
 
@@ -1603,8 +1615,10 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
 static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve, ALARM_GROUP *angleAlarm, uint32 *flag) {
     struct list_head *p;
     for (int i = 0; i < 360; i++) {
-        angleValve[i].num = 0; //cear ANGLE_VALVE::num ,  ANGLE_VALVE::inum
+        angleValve[i].num = 0; //cear ACT_GROUP::num
+        angleAlarm[i].num = 0; //cear ALARM_GROUP::num
     }
+
     if (func == NULL) {
         return;
     }
@@ -1709,7 +1723,7 @@ static uint16 common0506func2Valvecode(uint16 funcval) {
 
 static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
-      {{ 0, 293, 113},{ 0xffff, 0xffff, 0xffff},{ 0, 293, 113}},{{ 0, 23, 203},{ 0, 23, 23},{ 0, 23, 203}},{{ 0, 113, 293},{ 0xffff, 0xffff, 0xffff},{ 0, 113, 293}},{{ 0, 203, 23},{ 0, 203, 203},{ 0, 203, 23}},
+        { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}}, { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}}, { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}}, { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
     };
 
     bool in = false;
@@ -1789,31 +1803,43 @@ static uint16 misc0306code2Valvecode(uint16 codevalue) {
     return inorout | ivalve + VALVE_0603_BASE;
 }
 
-static uint16 funcode2Alarm(FUNC *func, uint32 *flag) {
-    uint16 alarmcode = 0;
+
+#define COMMON_FUNCODE_4_CODE  1
+#define COMMON_FUNCODE_8_CODE  2
+#define COMMON_FUNCODE_11_CODE    0x10
+#define COMMON_FUNCODE_12_11_CODE 0x11
+#define COMMON_FUNCODE_12_12_CODE 0x12
+#define COMMON_FUNCODE_12_13_CODE 0x13
+#define COMMON_FUNCODE_12_14_CODE 0x14
+#define COMMON_FUNCODE_12_2c_CODE 0x2c
+#define COMMON_FUNCODE_12_2d_CODE 0x2d
+
+static void funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
     if (func->funcode == 0x031e) {
         switch (func->value) {
         case 0x01:
-            alarmcode = 0;
-            *flag |= LINE_FLAG_F4;
+            alarmcode[*alarmnum] = COMMON_FUNCODE_8_CODE;
+            (*alarmnum)++;
             break;
+        default:
+            break;
+        }
+    } else if (func->funcode == 0x011e) {
+        switch (func->value) {
         case 0x03:
-            alarmcode = 0x03;
+            alarmcode[*alarmnum] = COMMON_FUNCODE_4_CODE;
+            (*alarmnum)++;
             break;
         default:
             break;
         }
     } else if (func->funcode == 0x0303) {
-        switch (func->value) {
-        case 0x10:
-            break;
-        case 0x11:
-            break;
-        default:
-            break;
+        if ((func->value <= 0x14 && func->value >= 0x10)
+          ||(func->value <= 0x2d && func->value >= 0x2c)) {
+            alarmcode[*alarmnum] = func->value;
+            (*alarmnum)++;
         }
     }
-    return alarmcode;
 }
 
 
@@ -1826,10 +1852,8 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
     switch (fun->funcode) {
     case 0x031e: //sel
         if (fun->value < 0x0d) {
-            *alarmcode = funcode2Alarm(fun, flag);
-            if (*alarmcode != 0) {
-                *alarmnum = 1;
-            }
+            funcode2Alarm(fun, alarmcode, alarmnum);
+            alarmcode += *alarmnum;
         } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
             *valvecode = hafuzhencode2Valvecode(fun->value);
             *valnum = 1;
@@ -1869,6 +1893,11 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
     case 0x0300:
         *valvecode = common0506func2Valvecode(fun->value);
         *valnum = 1;
+        break;
+    case 0x011e:
+    case 0x0303:
+        funcode2Alarm(fun, alarmcode, alarmnum);
+        alarmcode += *alarmnum;
         break;
     default:
         break;

@@ -360,6 +360,7 @@ typedef struct __S_CO_RUN S_CO_RUN;
 
 typedef struct {
     wchar filename[100];
+    unsigned char  parsed;
     CO_HEADER head;
     uint32 diameter;
     uint16 niddle;
@@ -427,7 +428,7 @@ typedef struct {
 
 typedef struct {
     uint16 num;
-    uint16 alarmcode[10];
+    uint16 alarmcode[15];
 }ALARM_GROUP;
 
 
@@ -468,7 +469,8 @@ typedef struct __S_CO_RUN {
 }S_CO_RUN;
 
 
-#define LINE_FLAG_F4  0x01
+
+
 #define LINE_FLAG_ACT 0x02
 
 
@@ -560,7 +562,7 @@ extern bool coMd5(const TCHAR *path, void *md5, int md5len);
 extern int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset);
 extern int32 coSave(S_CO *co, TCHAR *path);
 extern void coRelease(S_CO *co);
-extern uint32 coCreateIndex(S_CO_RUN *co_run, S_CO *co);
+extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
 extern int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size);
 extern void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
@@ -571,9 +573,8 @@ extern void coRelease(S_CO *co);
 
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co, unsigned int num);
 extern int cnParse(const TCHAR *path, S_CN_GROUP *val);
-
-extern void coRunBtsrBeginStudy(S_CO_RUN *co_run, int numofpoint, int numofbtsr,int co_size);
+extern void coRunInitBtsr(S_CO_RUN *co_run, int numofBtsr, int numofpoint, int co_size, bool *havematchbtsrfile);
 extern void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size);
-extern BOOL coRunBtsrSave(S_CO_RUN *co_run);
+extern bool coRunBtsrSave(S_CO_RUN *co_run);
 
 #endif
