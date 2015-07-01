@@ -27,7 +27,7 @@ static struct list_head speedfreelist;
 static FENGMEN __fengmen[1000];
 static struct list_head fengmenfreelist;
 
-static S_CO_RUN_STEP __run_step[2000];
+static S_CO_RUN_STEP __run_step[3000];
 static struct list_head runstepfreelist;
 
 static WELT_PARAM __welt_param_pool[100];
@@ -35,6 +35,7 @@ static struct list_head welt_param_freelist;
 
 static BTSR __btsr_pool[10];
 static struct list_head btsr_freelist;
+static struct list_head btsrlist;
 
 static unsigned char cofilebuf[1024 * 2048];
 
@@ -75,6 +76,7 @@ void coInit() {
     INIT_LIST_HEAD(&welt_param_freelist);
     INIT_LIST_HEAD(&speedfreelist);
     INIT_LIST_HEAD(&btsr_freelist);
+    INIT_LIST_HEAD(&btsrlist);
 
     for (int i = 0; i < lenthof(__func); i++) {
         list_add_tail(&__func[i].list, &funcfreelist);
@@ -160,7 +162,8 @@ static void readSpeed(uint8 *speedbuf, struct list_head *speed) {
     for (int i = 0;; i++) {
         CO_SPEED *co_speed = (CO_SPEED *)speedbuf + i;
         if (co_speed->step != 0xffffffff) {
-            SPEED *speedtemp = list_first_entry(&speedfreelist, SPEED, list);
+            SPEED *speedtemp = list_first_entry_or_null(&speedfreelist, SPEED, list);
+            ASSERT(speedtemp != NULL);
             list_del(&speedtemp->list);
             for (int i = 0; i < 8; i++) {
                 speedtemp->ramp[i] = co_speed->ramp[i][0];
@@ -187,7 +190,8 @@ bool readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
         //read func;
         uint32 addradd;
         while (1) {
-            FUNC *func = list_first_entry(&funcfreelist, FUNC, list);
+            FUNC *func = list_first_entry_or_null(&funcfreelist, FUNC, list);
+            ASSERT(func != NULL);
             CO_FUNC *cofunc = (CO_FUNC *)(funcaddr + addr);
             if (cofunc->angular != 0x8000) {
                 ASSERT(cofunc->angular < 360);
@@ -228,7 +232,8 @@ static void readFengmen(uint8 *fengmenbuf, struct list_head *fengmenlist, unsign
         FENGMEN *fengmen;
         CO_FENGMEN *fengmentemp = (CO_FENGMEN *)(fengmenbuf + *((uint32 *)fengmenbuf + i));
         while (1) {
-            fengmen = list_first_entry(&fengmenfreelist, FENGMEN, list);
+            fengmen = list_first_entry_or_null(&fengmenfreelist, FENGMEN, list);
+            ASSERT(fengmen != NULL);
             if (fengmentemp->angular != 0x8000) {
                 ASSERT(fengmentemp->angular < 360);
                 fengmen->angular = fengmentemp->angular;
@@ -463,10 +468,10 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
     unsigned int br;
-    int32 re = 0;
+    int32 re = CO_FILE_READ_OK;
 
     if (co->parsed) {
-        return  CO_PARSE_PARSED_ERROR;
+        return CO_PARSE_PARSED_ERROR;
     }
 
     //do co struct init
@@ -585,10 +590,13 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
 }
 
 
+static void freeBtsr(S_CO_RUN *co_run);
+
 void coRelease(S_CO *co) {
     if (!co->parsed) {
         return;
     }
+    co->parsed = 0;
     struct list_head *p,*n;
     list_for_each_safe(p, n, &co->speed) {
         SPEED *speed = list_entry(p, SPEED, list);
@@ -637,13 +645,7 @@ void coRelease(S_CO *co) {
         }
         //release btsr
         if (run->btsr != NULL) {
-            BTSR *btsr = run->btsr;
-            if (btsr->data != NULL) {
-                free(btsr->data);
-            }
-            memset(btsr, 0, sizeof*btsr);
-            list_add(&btsr->list, &btsr_freelist);
-            run->btsr = NULL;
+            freeBtsr(run);
         }
         memset(run, 0, sizeof*run);
     }
@@ -771,7 +773,8 @@ static void cocreateindex_speed(S_CO_RUN *co_run, S_CO *co) {
     SPEED *speed;
     speed = list_first_entry_or_null(&co->speed, SPEED, list);
     if (speed == NULL || speed->step != 0) {
-        speed = list_first_entry(&speedfreelist, SPEED, list);
+        speed = list_first_entry_or_null(&speedfreelist, SPEED, list);
+        ASSERT(speed != NULL);
         speed->step = 0;
         speed->rpm = 50;
         speed->coed = false;
@@ -966,83 +969,160 @@ static void cocreateindex_welt(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
-void coRunInitBtsr(S_CO_RUN *co_run, int numofbtsr, int numofpoint, int co_size, bool *havematchbtsrfile) {
-    S_CO *co = co_run->co;
+static void btsrLoadFile(BTSR *btsr, bool *havematchbtsrfile) {
+    *havematchbtsrfile = false;
     wchar_t btsrfilepath[200];
     wcscpy(btsrfilepath, FILEPATH);
-    wcscat(btsrfilepath, co->filename);
+    wcscat(btsrfilepath, btsr->name);
     fileFixNameReplace(btsrfilepath, L".btr");
-    int datasize = numofpoint * numofbtsr * co_run->numofline[co_size];
-    *havematchbtsrfile = false;
-    FIL btsrfile;
-    BTSR *cobtsr = NULL;
-    uint32 br;
-
-    //*isfindBtsrData = false;
-    if (co_size >= 8) {
+    FIL  btsrfile;
+    BTSR btsrtmp;
+    uint32 br,offset, datasize;
+    if (f_open(&btsrfile, btsrfilepath, FA_READ | FA_OPEN_EXISTING) != FR_OK) {
         return;
     }
-    //char *btsrdatatemp;
-    if (co_run->btsr != NULL) {
-        cobtsr = co_run->btsr;
-        if (datasize > cobtsr->sizeofdata) {
-            free(cobtsr->data);
-            cobtsr->data = (char *)malloc(datasize + 256);
-        }
-    } else {
-        cobtsr = list_first_entry(&btsr_freelist, BTSR, list);
-        list_del(&cobtsr->list);
-        cobtsr->data = (char *)malloc(datasize + 256);
-        co_run->btsr = cobtsr;
-    }
-    if (f_open(&btsrfile, btsrfilepath, FA_READ | FA_OPEN_EXISTING) != FR_OK) {
-        goto BTSR_FILE_NOTMATCH;
-    }
-    char *btsrdatabak = cobtsr->data;
-    if (FR_OK != f_read(&btsrfile, cobtsr, sizeof*cobtsr,&br) || br != sizeof*cobtsr) {
+
+    if (FR_OK != f_read(&btsrfile, &btsrtmp, sizeof btsrtmp,&br) || br != sizeof btsrtmp) {
         goto FILE_ERROR;
     }
-    uint32 offset = (uint32)cobtsr->data;
-    cobtsr->data = btsrdatabak;
-    if (cobtsr->coCheck != co->head.coCheck ||
-        cobtsr->numofline != co_run->numofline[co_size] ||
-        cobtsr->num != numofbtsr ||
-        cobtsr->point != numofpoint) {
+    offset = (uint32)btsrtmp.data;
+    if (btsrtmp.coCheck != btsr->coCheck ||
+        wcscmp(btsrtmp.name, btsr->name) != 0 ||
+        btsrtmp.cosize != btsr->cosize ||
+        btsrtmp.num != btsr->num ||
+        btsrtmp.point != btsr->point ||
+        btsrtmp.numofline != btsr->numofline) {
         goto FILE_ERROR;
     }
     if (FR_OK != f_lseek(&btsrfile, offset)) {
         goto FILE_ERROR;
     }
-    if (FR_OK != f_read(&btsrfile, cobtsr->data, cobtsr->sizeofdata, &br) || br != cobtsr->sizeofdata) {
+    datasize = btsrtmp.num * btsrtmp.point * btsrtmp.numofline;
+    if (FR_OK != f_read(&btsrfile, btsr->data, datasize, &br) || br != datasize) {
         goto FILE_ERROR;
     }
     f_close(&btsrfile);
+    btsr->dataAvailable = true;
     *havematchbtsrfile = true;
     return;
     FILE_ERROR:
     f_close(&btsrfile);
     f_unlink(btsrfilepath);
-    BTSR_FILE_NOTMATCH:
-    cobtsr->coCheck = co->head.coCheck;
-    cobtsr->num = numofbtsr;
-    cobtsr->numofline = co->run->numofline[co_size];
-    cobtsr->sizeofdata = numofpoint * numofbtsr * co_run->numofline[co_size];
-    cobtsr->point = numofpoint;
-    cobtsr->datapointer = 0;
 }
 
 
-void coRunBtsrStudy(S_CO_RUN *co_run, void *buf, int size) {
-    if (co_run->btsr && co_run->btsr->data) {
-        uint32 offset = co_run->btsr->datapointer;
-        memcpy(co_run->btsr->data + offset, buf, size);
-        co_run->btsr->datapointer += size;
+static BTSR* allocBtsr(S_CO_RUN *co_run, int32 num, int32 point, int cosize) {
+    struct list_head *p;
+    BTSR *btsr = NULL;
+    ASSERT(co_run->co);
+    ASSERT(cosize < 8);
+    S_CO *co = co_run->co;
+    uint32 cocheck = co->head.coCheck;
+    const wchar_t *coname = co->filename;
+    list_for_each(p, &btsrlist) {
+        btsr = list_entry(p, BTSR, list);
+        if (wcscmp(btsr->name, coname) == 0 && btsr->coCheck == cocheck &&
+            btsr->num == num && btsr->point == point && btsr->cosize == cosize &&
+            btsr->numofline == co_run->numofline[cosize]) { //find btsr in btsrlist
+            btsr->ref++;
+            return btsr;
+        }
     }
+    //if not find, get btsr frome btsr_freelist and add to btsrlist
+    btsr = list_first_entry_or_null(&btsr_freelist,BTSR,list);
+    ASSERT(btsr != NULL);
+    btsr->ref = 1;
+    btsr->coCheck = cocheck;
+    btsr->dataAvailable = false;
+    btsr->num = num;
+    uint32 numofpoint = btsr->point = point;
+    btsr->cosize = cosize;
+    uint32 numofline = btsr->numofline = co_run->numofline[cosize];
+    btsr->data = (char *)malloc(num * numofpoint * numofline);
+    ASSERT(btsr->data != NULL);
+    btsr->datapointer = 0;
+    ASSERT(wcslen(co->filename) < 50);
+    wcscpy(btsr->name, co->filename);
+    list_move(&btsr->list, &btsrlist);
+    bool dumy;
+    btsrLoadFile(btsr, &dumy);
+    co_run->btsr = btsr;
+    return btsr;
+}
+
+
+static void freeBtsr(S_CO_RUN *co_run) {
+    ASSERT(co_run->btsr);
+    BTSR *btsr = co_run->btsr;
+    if (--btsr->ref == 0) { //only 1 ref,  release btsr
+        if (btsr->data) {
+            free(btsr->data);
+            btsr->data = NULL;
+        }
+        list_move(&btsr->list, &btsr_freelist);
+    }
+    co_run->btsr = NULL;
+}
+
+
+void coRunInitBtsr(S_CO_RUN *co_run, int numofbtsr, int numofpoint, int co_size) {
+    if (co_run->btsr) {
+        freeBtsr(co_run);
+    }
+    allocBtsr(co_run, numofbtsr, numofpoint, co_size);
+}
+
+
+void coRunBtsrBeginStudy(S_CO_RUN *co_run) {
+    if (co_run->btsr) {
+        co_run->btsr->dataAvailable = false;
+        co_run->btsr->datapointer = 0;
+    }
+}
+
+void coRunBtsrStudy(S_CO_RUN *co_run, void *buf, int size) {
+    BTSR *btsr = co_run->btsr;
+    int32 sizeofLineData = btsr->num * btsr->point;
+    ASSERT(sizeofLineData == size);
+    ASSERT(co_run->btsr && co_run->btsr->data);
+    uint32 offset = co_run->btsr->datapointer;
+    memcpy(co_run->btsr->data + offset, buf, size);
+    btsr->datapointer += size;
+    int32 sizeofdata = btsr->numofline * sizeofLineData;
+    if (offset + size >= sizeofdata) {
+        btsr->dataAvailable = true;
+    }
+}
+
+
+bool coRunIsBtsrDataAvailable(S_CO_RUN *co_run) {
+    if (!co_run->btsr) {
+        return false;
+    }
+    return(bool)co_run->btsr->dataAvailable;
+}
+
+
+bool coRunBtsrData(S_CO_RUN *co_run, int32 iline, void **data, uint32 *datasize) {
+    if (co_run->btsr && co_run->btsr->data) {
+        BTSR *btsr = co_run->btsr;
+        uint32 sizeofline = iline * btsr->point * btsr->num;
+        ASSERT(iline < btsr->numofline);
+        *data = &btsr->data[sizeofline * iline];
+        *datasize = sizeofline;
+        return true;
+    }
+    *datasize = 0;
+    *data = NULL;
+    return false;
 }
 
 
 BOOL coRunBtsrSave(S_CO_RUN *co_run) {
     if (co_run->btsr == NULL) {
+        return false;
+    }
+    if (!co_run->btsr->dataAvailable) {
         return false;
     }
     S_CO *co = co_run->co;
@@ -1055,28 +1135,29 @@ BOOL coRunBtsrSave(S_CO_RUN *co_run) {
         return false;
     }
     uint32 wr;
+    int32 sizeofdata;
     BTSR btemp;
     btemp = *co_run->btsr;
-    btemp.data = (char *)128;
+    btemp.data = (char *)256;
     btemp.datapointer = 0;
 
     if (FR_OK != f_write(&btsrfile, &btemp, sizeof btemp,&wr) || wr != sizeof btemp) {
         goto ERROR;
     }
-    f_lseek(&btsrfile, 128);
-    if (FR_OK != f_write(&btsrfile, co_run->btsr->data, co_run->btsr->sizeofdata, &wr) || wr != co_run->btsr->sizeofdata) {
+    f_lseek(&btsrfile, 256);
+    sizeofdata = co_run->btsr->numofline * co_run->btsr->point* co_run->btsr->num;
+    if (FR_OK != f_write(&btsrfile, co_run->btsr->data, sizeofdata, &wr) || wr != sizeofdata) {
         goto ERROR;
     }
     f_close(&btsrfile);
 
-    //########################################################
-    //测试程序  保存完毕 拷贝到U盘文件
+#if BTSR_DEBUG == 1
     wchar_t despath[100];
     wcscpy(despath, btsrfilepath);
     despath[0] = L'2';
     char cpbuf[1024];
     f_copy(btsrfilepath, despath, cpbuf, sizeof cpbuf);
-    //#######################################################
+#endif
 
     return true;
     ERROR:
@@ -1089,7 +1170,7 @@ BOOL coRunBtsrSave(S_CO_RUN *co_run) {
 
 
 void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
-    uint32 flag = 0;
+    //uint32 flag = 0;
     if (!co->parsed) {
         return;
     }
@@ -1175,15 +1256,11 @@ static void corunCalcSizemotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 siz
         int32 sizemotoracc = step->sizemotor->param[size].acc;
         uint32 sizemotorend = step->sizemotor->param[size].end;
         uint32 sizemotorbaseline = co_run->stepptr[step->sizemotor->head.beginStep]->ilinetag[size];
-        /*co_run->sizemotor = sizemotorbase + sizemotoracc * (co_run->nextline - sizemotorbaseline);
-        if ((sizemotoracc > 0 && co_run->sizemotor > sizemotorend)
-            || (sizemotoracc < 0 && co_run->sizemotor < sizemotorend)) {
-            co_run->sizemotor = sizemotorend;
-        }*/
+
         line->sizemotor = mathCalcuLineFunc(sizemotorbase, sizemotorend,
                                             sizemotorbaseline, line->iline,
                                             sizemotoracc);
-        if (IS_ECONO_BEGIN_END(*step)) {
+        /*if (IS_ECONO_BEGIN_END(*step)) {
             if (line->iline == step->ilinetag[size]) {
                 line->stepSizemotorBase = mathCalcuLineFunc(sizemotorbase, sizemotorend,
                                                             sizemotorbaseline, step->ilinetag[size],
@@ -1193,7 +1270,7 @@ static void corunCalcSizemotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 siz
         } else {
             line->stepSizemotorBase = 0;
             line->stepSizemotorAcc = 0;
-        }
+        }*/
     } else {
         line->zonename = NULL;
         line->zonebegin = 0;
@@ -1212,7 +1289,7 @@ static void corunCalcSinkermotor1_3(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint3
         line->sinkmotor1_3 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
                                                sinkermotorbaseline, line->iline,
                                                sinkermotoracc);
-        if (IS_ECONO_BEGIN_END(*step)) {
+        /*if (IS_ECONO_BEGIN_END(*step)) {
             if (line->iline == step->ilinetag[size]) {
                 line->stepSinkermotor1_3Base = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
                                                                  sinkermotorbaseline, step->ilinetag[size],
@@ -1222,61 +1299,79 @@ static void corunCalcSinkermotor1_3(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint3
                 line->stepSinkermotor1_3Base = 0;
                 line->stepsinkermotor1_3Acc = 0;
             }
-        }
+        }*/
     }
 }
 
-int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size) {
-    ASSERT(linepre->co_run == co_run);
-    line->co_run = linepre->co_run;
-    int32 preistep = linepre->istep;
-    int32 stepindex = line->istep = linepre->nextstep;
 
-    int32 iline = line->iline = linepre->nextline;
-
-    S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
-
-    if (iline >= co_run->numofline[size]) {
+int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *preline, uint32 size) {
+    ASSERT(preline->co_run == co_run);
+    line->co_run = preline->co_run;
+    int32 preistep = preline->istep;
+    int32 preiline = preline->iline;
+    if (preiline >= co_run->numofline[size] - 1) { // preline is last line
         return -1;
     }
+    S_CO_RUN_STEP *prestep = co_run->stepptr[preistep];
 
+    if (IS_ECONO_END(*prestep)) {
+        if (preline->iecono == prestep->econo->economize[size] - 1) { // last loop
+            line->iecono = 0;
+            line->istep = preistep + 1;
+            line->iline = preiline + 1;
+        } else { // not last loop
+            line->iecono = preline->iecono + 1;
+            line->istep = preline->econobegin;
+            line->iline = prestep->ilinetag[size];
+            line->iline = prestep->ilinetag[size] +
+                          (prestep->econo->end - prestep->econo->begin + 1) * line->iecono;
+        }
+    } else {
+        line->istep = preistep + 1;
+        line->iline = preiline + 1;
+        line->iecono = preline->iecono;
+    }
+    int32 istep = line->istep;
+    S_CO_RUN_STEP *step = co_run->stepptr[istep];
 
-    //calculate speed
-    line->prerpm = linepre->rpm;
-    line->speedAcc = linepre->speedAcc;
-    line->targetSpeed = linepre->targetSpeed;
+    if (IS_ECONO_INECONO(*step)) {
+        line->econobegin = step->econo->begin;
+        line->econoend = step->econo->end;
+        line->econonum = step->econo->economize[size];
+    } else {
+        line->econobegin = istep;
+        line->econoend = istep;
+        line->econonum = 1;
+    }
+
+//calculate speed
+    line->prerpm = preline->rpm;
+    line->speedAcc = preline->speedAcc;
+    line->targetSpeed = preline->targetSpeed;
     corunCalcSpeed(co_run, line, size);
 
-    //calculate sizemotor;
-    line->stepSizemotorBase = linepre->stepSizemotorBase;
-    line->stepSizemotorAcc = linepre->stepSizemotorAcc;
+//calculate sizemotor;
+//line->stepSizemotorBase = preline->stepSizemotorBase;
+//line->stepSizemotorAcc = preline->stepSizemotorAcc;
     corunCalcSizemotor(co_run, line, size);
 
-    //calculate sinker motor_1_3
-    line->stepSinkermotor1_3Base = linepre->stepSinkermotor1_3Base;
-    line->stepsinkermotor1_3Acc = linepre->stepsinkermotor1_3Acc;
+//calculate sinker motor_1_3
+//line->stepSinkermotor1_3Base = preline->stepSinkermotor1_3Base;
+//line->stepsinkermotor1_3Acc = preline->stepsinkermotor1_3Acc;
     corunCalcSinkermotor1_3(co_run, line, size);
 
-    //calculate sinker motor_2_4
-    /*SINKERMOTOR_ZONE *sinkermotor_zone_2_4 = step->sinkmoterzone_2_4;
-    if (sinkermotor_zone_2_4 != NULL) {
-        uint32 sinkermotorbase = sinkermotor_zone_2_4->param[size].qi_feed;
-        int32 sinkermotoracc = sinkermotor_zone_2_4->param[size].acc;
-        uint32 sinkermotorend = sinkermotor_zone_2_4->param[size].qf_feed;
-        uint32 sinkermotorbaseline = co_run->stepptr[sinkermotor_zone_2_4->head.beginStep]->ilinetag[size];
-        co_run->sinkmotor2_4 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
-                                                 sinkermotorbaseline, co_run->nextline,
-                                                 sinkermotoracc);
-    }*/
-    //welt;
+//calculate sinker motor_2_4
+/////////////////////////////////////////
+///
+//welt;
     line->welt = step->welt;
 
-    //funcode
+//funcode
     line->flag = 0;
     funcodeParse(step->func, line->act, line->alarm, &line->flag);
 
-    //fengmen
-    if (step->fengmen != NULL && stepindex != preistep) {
+//fengmen
+    if (step->fengmen != NULL && istep != preistep) {
         line->isfengmenAct = true;
         memset(line->fengmen, 0, sizeof line->fengmen);
         struct list_head *p;
@@ -1289,56 +1384,28 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepr
         line->isfengmenAct = false;
     }
 
-    //process step ,calculate next step
-    if (IS_ECONO_INECONO(*step)) {
-        if (IS_ECONO_BEGIN(*step)) {
-            line->iecono = linepre->iecono + 1;
-            line->econobegin = step->econo->begin;
-            line->econoend = step->econo->end;
-            line->econonum = step->econo->economize[size];
-            if (!IS_ECONO_BEGIN_END(*step)) {
-                line->nextstep = stepindex + 1;
-            } else {
-                line->nextstep = stepindex;
-                line->isStepEcono = true;
-                if (line->iecono == line->econonum) { //last loop
-                    line->nextstep = stepindex + 1;
-                }
-            }
-        } else if (IS_ECONO_END(*step)) {
-            if (line->iecono == line->econonum) { //last loop
-                line->nextstep = stepindex + 1;
-            } else {
-                line->nextstep = line->econobegin;
-            }
-        } else {
-            line->nextstep = stepindex + 1;
-        }
-
-        if (line->iecono != 0) {
-            line->ieconodisplay = line->iecono - 1;
-        } else {
-            line->ieconodisplay = 0;
-        }
-    } else {
-        line->nextstep = stepindex + 1;
-        line->iecono = 0;
-        line->ieconodisplay = 0;
-        line->econobegin = 0;
-        line->econoend = 0;
-        line->econonum = 1;
-        line->isStepEcono = false;
-    }
-    line->nextline = iline + 1;
     return co_run->numofline[size] - line->iline - 1;
 }
 
 
 void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     ASSERT(line->co_run == co_run);
-    line->iline = line->nextline;
+    //line->iline = line->nextline;
     S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
     //S_CO_RUN_STEP *nextstep = co_run->stepptr[line->istep + 1];
+
+    //process step ,calculate next step
+    if (IS_ECONO_BEGIN_END(*step)) {
+        if (line->iecono < line->econonum - 1) { //not last loop
+            line->iline++;
+            line->iecono++;
+        } else { //last loop
+            line->iline = step->ilinetag[size];
+            line->iecono = 0;
+        }
+    }
+
+    //calculate speed;
     line->rpm = 200;
 
     //calculate sizemotor;
@@ -1346,61 +1413,55 @@ void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 
     //calculate sinker motor_1_3
     corunCalcSinkermotor1_3(co_run, line, size);
-
-    //process step ,calculate next step
-    if (IS_ECONO_BEGIN_END(*step)) {
-        line->iecono++;
-        if (line->nextline == step->ilinetag[size]) {
-            line->iecono = 1;
-        }
-        if (line->iecono != line->econonum) { //not last loop
-            line->nextline++;
-        } else { //last loop
-            line->nextline = step->ilinetag[size];
-            //line->iecono = 0;
-        }
-        if (line->iecono != 0) {
-            line->ieconodisplay = line->iecono - 1;
-        } else {
-            line->ieconodisplay = 0;
-        }
-    }
 }
 
 
 
 
-uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size) {
-    ASSERT(linepre->co_run == co_run);
-    line->co_run = linepre->co_run;
-    int32 preistep = linepre->istep;
-    int32 stepindex = line->istep = linepre->istep + 1;
-    line->iline = co_run->stepptr[stepindex]->ilinetag[size];
+uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *preline, uint32 size) {
+    ASSERT(preline->co_run == co_run);
+    line->co_run = preline->co_run;
+    int32 preistep = preline->istep;
 
-
-    line->prerpm = linepre->rpm;
-    S_CO_RUN_STEP *step = co_run->stepptr[stepindex];
-
-    if (stepindex >= co_run->numofstep) {
+    if (preistep >= co_run->numofstep - 1) {
         return -1;
     }
 
+    //process step
+    int32 istep = line->istep = preline->istep + 1;
+
+    line->iline = co_run->stepptr[istep]->ilinetag[size];
+
+    S_CO_RUN_STEP *step = co_run->stepptr[istep];
+
+    line->iecono = 0;
+    if (IS_ECONO_INECONO(*step)) {
+        line->econobegin = step->econo->begin;
+        line->econoend = step->econo->end;
+        line->econonum = step->econo->economize[size];
+    } else {
+        line->econobegin = istep;
+        line->econoend = istep;
+        line->econonum = 1;
+    }
+
     //calculate speed;
-    line->prerpm = linepre->rpm;
-    line->speedAcc = linepre->speedAcc;
-    line->targetSpeed = linepre->targetSpeed;
+    line->prerpm = preline->rpm;
+    line->speedAcc = preline->speedAcc;
+    line->targetSpeed = preline->targetSpeed;
     corunCalcSpeed(co_run, line, size);
+    line->rpm = MIN(200, line->rpm);
 
     //calculate sizemotor
-    line->stepSizemotorBase = linepre->stepSizemotorBase;
-    line->stepSizemotorAcc = linepre->stepSizemotorAcc;
+    line->stepSizemotorBase = preline->stepSizemotorBase;
+    line->stepSizemotorAcc = preline->stepSizemotorAcc;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    line->stepSinkermotor1_3Base = linepre->stepSinkermotor1_3Base;
-    line->stepsinkermotor1_3Acc = linepre->stepsinkermotor1_3Acc;
+    line->stepSinkermotor1_3Base = preline->stepSinkermotor1_3Base;
+    line->stepsinkermotor1_3Acc = preline->stepsinkermotor1_3Acc;
     corunCalcSinkermotor1_3(co_run, line, size);
-    corunCalcSinkermotor1_3(co_run, line, size);
+    //corunCalcSinkermotor1_3(co_run, line, size);
 
     //welt;
     line->welt = step->welt;
@@ -1408,26 +1469,6 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linep
     //funcode
     funcodeParse(step->func, line->act, line->alarm, &line->flag);
 
-    //process step
-    line->ieconodisplay = 0;
-    line->nextstep = line->istep + 1;
-    if (line->nextstep < co_run->numofstep) {
-        line->nextline = co_run->stepptr[line->nextstep]->ilinetag[size];
-    }
-
-    if (IS_ECONO_INECONO(*step)) {
-        if (IS_ECONO_BEGIN(*step)) { // loop begin
-            line->iecono = step->econo->economize[size];
-            line->econonum = step->econo->economize[size];
-            line->econobegin = step->econo->begin;
-            line->econoend = step->econo->end;
-        }
-    } else {
-        line->iecono = 0;
-        line->econobegin = 0;
-        line->econoend = 0;
-        line->econonum = 1;
-    }
     return co_run->numofstep - line->istep - 1;
 }
 
@@ -1437,10 +1478,7 @@ void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line) {
     //seek 0
     line->co_run = co_run;
     line->istep = -1;
-    line->nextstep = 0;               //nextstep != istep+1, due to economizer
     line->iline = -1;
-    line->nextline = 0;
-    line->isStepEcono = false;
     line->prerpm = 0;
     line->rpm = 0;
     line->iecono = 0;                  //current economizer counter
@@ -1522,8 +1560,7 @@ bool cnCreate(const TCHAR *path, S_CN_GROUP *co, uint32 num) {
     f_stat(path, &fileinfo);
 
     //set filename to cn buf
-    for (int i=0;i<13;i++)
-    {
+    for (int i = 0; i < 13; i++) {
         filename[i] = fileinfo.fname[i];
     }
     strtok(filename, ".");
@@ -1809,6 +1846,9 @@ static uint16 misc0306code2Valvecode(uint16 codevalue) {
     uint16 ivalve = codevalue >> 1;
     return inorout | ivalve + VALVE_0603_BASE;
 }
+
+
+
 static void funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
     if (func->funcode == 0x031e) {
         switch (func->value) {
@@ -1830,7 +1870,7 @@ static void funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
         }
     } else if (func->funcode == 0x0303) {
         if ((func->value <= 0x14 && func->value >= 0x10)
-          ||(func->value <= 0x2d && func->value >= 0x2c)) {
+            || (func->value <= 0x2d && func->value >= 0x2c)) {
             alarmcode[*alarmnum] = func->value;
             (*alarmnum)++;
         }

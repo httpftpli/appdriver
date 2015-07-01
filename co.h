@@ -27,16 +27,6 @@
 #define COMM_FUNC_BASE    0x2c0
 
 
-#define COMMON_FUNCODE_4_CODE  0x01
-#define COMMON_FUNCODE_8_CODE  0x02
-#define COMMON_FUNCODE_11_CODE    0x10
-#define COMMON_FUNCODE_12_11_CODE 0x11
-#define COMMON_FUNCODE_12_12_CODE 0x12
-#define COMMON_FUNCODE_12_13_CODE 0x13
-#define COMMON_FUNCODE_12_14_CODE 0x14
-#define COMMON_FUNCODE_12_2c_CODE 0x2c
-#define COMMON_FUNCODE_12_2d_CODE 0x2d
-
 
 typedef __packed struct {
     uint16 unkown;
@@ -355,13 +345,16 @@ typedef struct {
 
 
 typedef struct{
+    wchar name[50];
     int num;
     int point;
     int numofline;
     uint32 coCheck;
+    uint32 dataAvailable;
     char * data;
-    int sizeofdata;
+    int cosize;
     int datapointer;
+    int ref;
     struct list_head list;
 }BTSR;
 
@@ -426,7 +419,7 @@ typedef struct {
 #define ECONO_END     5
 #define IS_ECONO_BEGIN(A)   (((A).econoFlag & ECONO_BEGIN)==ECONO_BEGIN)
 #define IS_ECONO_END(A)   (((A).econoFlag & ECONO_END)==ECONO_END)
-#define IS_ECONO_BEGIN_END(A)  (((A).econoFlag & (ECONO_END | ECONO_END))==(ECONO_END | ECONO_END))
+#define IS_ECONO_BEGIN_END(A)  (((A).econoFlag & (ECONO_BEGIN | ECONO_END))==(ECONO_BEGIN | ECONO_END))
 #define IS_ECONO_INECONO(A)   ((A).econoFlag & ECONO_INECONO)
 
 
@@ -484,14 +477,25 @@ typedef struct __S_CO_RUN {
 #define LINE_FLAG_ACT 0x02
 
 
+#define COMMON_FUNCODE_4_CODE  0x01
+#define COMMON_FUNCODE_8_CODE  0x02
+#define COMMON_FUNCODE_11_CODE    0x10
+#define COMMON_FUNCODE_12_11_CODE 0x11
+#define COMMON_FUNCODE_12_12_CODE 0x12
+#define COMMON_FUNCODE_12_13_CODE 0x13
+#define COMMON_FUNCODE_12_14_CODE 0x14
+#define COMMON_FUNCODE_12_2c_CODE 0x2c
+#define COMMON_FUNCODE_12_2d_CODE 0x2d
+
+
 typedef struct {
     S_CO_RUN *co_run;
 
     int16 istep;                    //当前STEP
-    int32 nextstep;                //nextstep != istep+1, due to economizer
+    //int32 nextstep;                //nextstep != istep+1, due to economizer
 
     int32 iline;                    //实际当前圈数
-    int32 nextline;                //下一行
+    //int32 nextline;                //下一行
 
 
     uint16 prerpm;
@@ -501,10 +505,7 @@ typedef struct {
 
     bool welt;                      //flag is_or_not in welt;
 
-    bool isStepEcono;
-
     uint16 iecono;                   //当前循环
-    uint16 ieconodisplay;
     uint16 econobegin;              //当前循环首,如果没有循环为0
     uint16 econoend;                //当前循环尾,如果没有循环为0
     uint16 econonum;                 //当前循环总共循环
@@ -575,9 +576,9 @@ extern int32 coSave(S_CO *co, TCHAR *path);
 extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
 extern void coRun(S_CO_RUN *co_run);
-extern int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size);
+extern int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *linepre, uint32 size);
 extern void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size);
-extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepre, uint32 size);
+extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *linepre, uint32 size);
 //extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line);
 extern void coRelease(S_CO *co);
@@ -585,11 +586,13 @@ extern void coRelease(S_CO *co);
 #define CN_OK  0
 #define CN_READ_ERROR    -1
 #define CN_FILE_ERROR    -2
-
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co, unsigned int num);
 extern int cnParse(const TCHAR *path, S_CN_GROUP *val);
-extern void coRunInitBtsr(S_CO_RUN *co_run, int numofBtsr, int numofpoint, int co_size, bool *havematchbtsrfile);
+extern void coRunInitBtsr(S_CO_RUN *co_run, int numofBtsr, int numofpoint, int co_size);
+extern void coRunBtsrBeginStudy(S_CO_RUN *co_run);
 extern void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size);
 extern bool coRunBtsrSave(S_CO_RUN *co_run);
+extern bool coRunBtsrData(S_CO_RUN *co_run, int32 iline,void **data,uint32 *datasize);
+extern bool coRunIsBtsrDataAvailable(S_CO_RUN *co_run);
 
 #endif
