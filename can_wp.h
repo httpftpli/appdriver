@@ -54,6 +54,7 @@ typedef struct {
 }CAN_WP;
 
 #define CAN_WP_GET_TYPE(ID) ((ID)>>6)
+#define CAN_WP_GET_ID(ID) ((ID) & 0x3f) 
 #define CAN_WP_ID(TYPE,id) ((TYPE)<<6 | (id))
 #define CAN_WP_ID_GROUP_BROADCAST(id) CAN_WP_ID(0x0f,(id))
 #define CAN_WP_ID_ALL_BROADCAST 0xff

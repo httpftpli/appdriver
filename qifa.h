@@ -345,14 +345,28 @@ typedef struct
     unsigned char board_id;     //0~10
     unsigned char xuhao;        //0~15
     unsigned short inout:1;
+    unsigned short inout_bak:1;
     unsigned short nc_no:1;
     unsigned short default_nc_no:1;
     unsigned short nc_no_change_dis:1;
     unsigned short nc_no_en:1;
     unsigned short reset_f0_inout:1;
     unsigned short cam_en:1;
-    unsigned short flag:8;
+    unsigned short flag;
+    unsigned short Ohm;
 }QIFA;
+
+
+typedef struct {
+    QIFA *QiFa_Reg;
+    QIFA *QiFa_Reg_Table[10][16];
+    uint32 numofboard;
+    uint32 numperboard;
+}QIFA_SYS;
+
+
+extern  QIFA_SYS qifaSys;
+extern  uint16 qifawarn[30];
 
 
 
@@ -380,14 +394,28 @@ extern void wpRunIsr_QfWrite(RINGBUF * ringBuf,unsigned char id, unsigned char *
 extern bool qifaInit();
 extern void qifaSet(QIFA *qifa,uint32 val);
 extern void qifaSet1(uint32 boardId,uint32 iqifa, uint32 val);
+extern void qifaSetIo(uint32 wpId, uint32 iqifa, uint32 val);
 extern int32 qifaRead(QIFA *qifa,bool comm);
 extern int32 qifaRead1(uint32 boardId,uint32 iqifa,bool comm);
 extern uint32 qifaRead2(uint32 boardId, bool comm);
+extern int32 qifaReadIo(QIFA *qifa, bool comm);
+extern int32 qifaReadIo1(uint32 wpId,uint32 iqifa,bool comm);
+extern uint32 qifaReadIo2(uint32 wpId, bool comm);
+extern uint16 qifaReadWarn(uint32 wpId);
+
+
+
+extern uint32 qifaBak(QIFA *qifa);
+extern void qifaRestore(QIFA *qifa);
+
+
+extern uint32 qifaBak2(uint32 wpId);
+extern void qifaRestore2(uint32 wpId);
 
 extern void qifaProcess();
 
 #endif /* __QIFA__H__*/
 
-/* __QIFA__H__*/
+
 
 

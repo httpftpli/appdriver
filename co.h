@@ -27,6 +27,16 @@
 #define COMM_FUNC_BASE    0x2c0
 
 
+#define COMMON_FUNCODE_4_CODE  0x01
+#define COMMON_FUNCODE_8_CODE  0x02
+#define COMMON_FUNCODE_11_CODE    0x10
+#define COMMON_FUNCODE_12_11_CODE 0x11
+#define COMMON_FUNCODE_12_12_CODE 0x12
+#define COMMON_FUNCODE_12_13_CODE 0x13
+#define COMMON_FUNCODE_12_14_CODE 0x14
+#define COMMON_FUNCODE_12_2c_CODE 0x2c
+#define COMMON_FUNCODE_12_2d_CODE 0x2d
+
 
 typedef __packed struct {
     uint16 unkown;
@@ -538,6 +548,7 @@ __packed typedef struct {
 }
 CN_GROUP;
 
+#define CO_PARSE_PARSED_ERROR  -4
 #define CO_FILE_PARSE_ERROR -3
 #define CO_FILE_READ_ERROR  -1
 #define CO_FILE_CHECK_ERROR -2
@@ -570,6 +581,10 @@ extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE
 //extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line);
 extern void coRelease(S_CO *co);
+
+#define CN_OK  0
+#define CN_READ_ERROR    -1
+#define CN_FILE_ERROR    -2
 
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co, unsigned int num);
 extern int cnParse(const TCHAR *path, S_CN_GROUP *val);

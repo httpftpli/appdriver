@@ -18,19 +18,19 @@
 
 
 
-static FUNC __func[1000];
+static FUNC __func[2000];
 static struct list_head funcfreelist;
 
-static SPEED __speed[400];
+static SPEED __speed[800];
 static struct list_head speedfreelist;
 
 static FENGMEN __fengmen[1000];
 static struct list_head fengmenfreelist;
 
-static S_CO_RUN_STEP __run_step[1500];
+static S_CO_RUN_STEP __run_step[2000];
 static struct list_head runstepfreelist;
 
-static WELT_PARAM __welt_param_pool[50];
+static WELT_PARAM __welt_param_pool[100];
 static struct list_head welt_param_freelist;
 
 static BTSR __btsr_pool[10];
@@ -464,6 +464,10 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     FIL file;
     unsigned int br;
     int32 re = 0;
+
+    if (co->parsed) {
+        return  CO_PARSE_PARSED_ERROR;
+    }
 
     //do co struct init
     for (int i = 0; i < lenthof(co->func); i++) {
@@ -978,7 +982,7 @@ void coRunInitBtsr(S_CO_RUN *co_run, int numofbtsr, int numofpoint, int co_size,
     if (co_size >= 8) {
         return;
     }
-    char *btsrdatatemp;
+    //char *btsrdatatemp;
     if (co_run->btsr != NULL) {
         cobtsr = co_run->btsr;
         if (datasize > cobtsr->sizeofdata) {
@@ -1245,7 +1249,7 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linepr
 
     //calculate sizemotor;
     line->stepSizemotorBase = linepre->stepSizemotorBase;
-    line->stepSizemotorAcc = linepre->stepSizemotorBase;
+    line->stepSizemotorAcc = linepre->stepSizemotorAcc;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
@@ -1389,7 +1393,7 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, S_CO_RUN_LINE *linep
 
     //calculate sizemotor
     line->stepSizemotorBase = linepre->stepSizemotorBase;
-    line->stepSizemotorAcc = linepre->stepSizemotorBase;
+    line->stepSizemotorAcc = linepre->stepSizemotorAcc;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
@@ -1476,6 +1480,7 @@ static const unsigned char cnhexData[272] = {
 static void cocnfilenameformat(char *namestr, char buf[8]) {
     //set filename to cn buf
     memset(buf, 0x20, 8);
+    buf[0] = 0;
     for (int i = 0; i < 8; i++) {
         if (namestr[i] != 0 && namestr[i] != '.') {
             buf[i] = namestr[i];
@@ -1513,10 +1518,14 @@ bool cnCreate(const TCHAR *path, S_CN_GROUP *co, uint32 num) {
         return false;
     }
     f_sync(&file);
+    fileinfo.lfname = NULL;
     f_stat(path, &fileinfo);
 
     //set filename to cn buf
-    memcpy(filename, fileinfo.fname, 13);
+    for (int i=0;i<13;i++)
+    {
+        filename[i] = fileinfo.fname[i];
+    }
     strtok(filename, ".");
     for (int i = 0; i < 8; i++) {
         if (filename[i] != 0) {
@@ -1539,6 +1548,7 @@ bool cnCreate(const TCHAR *path, S_CN_GROUP *co, uint32 num) {
     r = f_write(&file, buf, 512, &bw);
     if (r != FR_OK || bw != 512) {
         f_close(&file);
+        f_unlink(path);
         return false;
     }
     f_close(&file);
@@ -1548,19 +1558,16 @@ bool cnCreate(const TCHAR *path, S_CN_GROUP *co, uint32 num) {
 
 
 int cnParse(const TCHAR *path, S_CN_GROUP *val) {
-#define CN_OK  0
-#define CN_READ_ERROR    -1
-#define CN_FILE_ERROR    -2
     //open co file
     FIL file;
     uint32 br, check;
-    int32 re;
+    int32 re = CN_OK;
     char buf[256];
     CN_GROUP cogp;
     FRESULT r = f_open(&file, path, FA_READ);
     if (r != FR_OK) {
         re = CN_READ_ERROR;
-        return false;
+        return re;
     }
     if (f_size(&file) != 512) {
         re = CN_FILE_ERROR;
@@ -1802,18 +1809,6 @@ static uint16 misc0306code2Valvecode(uint16 codevalue) {
     uint16 ivalve = codevalue >> 1;
     return inorout | ivalve + VALVE_0603_BASE;
 }
-
-
-#define COMMON_FUNCODE_4_CODE  1
-#define COMMON_FUNCODE_8_CODE  2
-#define COMMON_FUNCODE_11_CODE    0x10
-#define COMMON_FUNCODE_12_11_CODE 0x11
-#define COMMON_FUNCODE_12_12_CODE 0x12
-#define COMMON_FUNCODE_12_13_CODE 0x13
-#define COMMON_FUNCODE_12_14_CODE 0x14
-#define COMMON_FUNCODE_12_2c_CODE 0x2c
-#define COMMON_FUNCODE_12_2d_CODE 0x2d
-
 static void funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
     if (func->funcode == 0x031e) {
         switch (func->value) {
