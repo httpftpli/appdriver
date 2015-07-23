@@ -26,9 +26,11 @@
 #define DMP_DEV_HDTYPE_SSF    ('S'|'S'<<8|'F'<<16)
 #define DMP_DEV_HDTYPE_SSR    ('S'|'I'<<8|'N'<<16)
 #define DMP_DEV_HDTYPE_SSC    ('S'|'Q'<<8|'F'<<16)
+#define DMP_DEV_HDTYPE_SHB    ('S'|'H'<<8|'B'<<16)
 
 #define DMP_DEV_HDTYPE_SMD    ('S'|'M'<<8|'D'<<16)   //Ö÷°å
 
+#define DMP_DEV_HDTYPE_NUM   5
 
 
 #define DEV_COMP_DIFUID
@@ -89,6 +91,9 @@ static inline unsigned int dmpdevtype2index(unsigned int type) {
     case DMP_DEV_HDTYPE_SSF:
         index = 3;
         break;
+    case DMP_DEV_HDTYPE_SHB:
+        index = 4;
+        break;
     default:
         break;
     }
@@ -97,7 +102,7 @@ static inline unsigned int dmpdevtype2index(unsigned int type) {
 
 static inline unsigned int dmpindex2devtype(unsigned int index) {
     static unsigned int mapxx[]= {DMP_DEV_HDTYPE_SBJ,DMP_DEV_HDTYPE_SSR,
-            DMP_DEV_HDTYPE_SSC,DMP_DEV_HDTYPE_SSF} ;
+            DMP_DEV_HDTYPE_SSC,DMP_DEV_HDTYPE_SSF,DMP_DEV_HDTYPE_SHB};
     return mapxx[index];
 }
 
@@ -112,8 +117,8 @@ typedef struct dmp_dev_help_{
 
 
 typedef struct dmp_system_ {
-    unsigned int num [4];
-    DMP_DEV_GROUP dev[4];
+    unsigned int num [DMP_DEV_HDTYPE_NUM];
+    DMP_DEV_GROUP dev[DMP_DEV_HDTYPE_NUM];
     struct list_head  unknow;
 } DMP_SYSTEM;
 
@@ -167,6 +172,7 @@ extern void dmpSysStore();
 extern bool dmpCheckDev();
 extern bool dmpSysSave();
 extern bool dmpAutoRegester(unsigned int devTypeIndex);
+extern uint32 dmpsysListOffline(unsigned int devTypeIndex,DMP_DEV **devbuf, uint32 num);
 extern bool dmpWillRegAuto(unsigned int devTypeIndex) ;
 extern bool dmpRegester(DMP_DEV *dev,unsigned int id);
 extern void dmpSysDevCnt(unsigned int devtypeIndex, unsigned int *regedCnt,
@@ -180,7 +186,7 @@ extern bool dmpPreRegester2(DMP_DEV *dev, bool val);
 extern void composeDev(DMP_DEV *list1, DMP_DEV *list2, DMP_DEV_COMP resultList);
 extern void dmpUnregesterOffline(unsigned int devTypeIndex);
 extern bool dmpWillUnReg(unsigned int devTypeIndex) ;
-extern unsigned int dmpSysWillRegCnt(unsigned int typeindex);
+extern unsigned int dmpSysWillRegCnt(unsigned int typeindex, uint32 *flag);
 extern void dmpCanRdDevVer(unsigned int uid);
 //extern bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout);
 extern bool dmpCanPreSetId(unsigned int devUid,bool val, unsigned int timeout);

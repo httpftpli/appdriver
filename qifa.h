@@ -341,14 +341,14 @@
 
 typedef struct
 {
-    wchar_t *name;                //NAME
+    wchar_t *name[13];                //NAME
     unsigned char board_id;     //0~10
     unsigned char xuhao;        //0~15
     unsigned short inout:1;
     unsigned short inout_bak:1;
     unsigned short nc_no:1;
     unsigned short default_nc_no:1;
-    unsigned short nc_no_change_dis:1;
+    unsigned short nc_no_changeable:1;
     unsigned short nc_no_en:1;
     unsigned short reset_f0_inout:1;
     unsigned short cam_en:1;
@@ -360,6 +360,7 @@ typedef struct
 typedef struct {
     QIFA *QiFa_Reg;
     QIFA *QiFa_Reg_Table[10][16];
+    uint32 numofqifa;
     uint32 numofboard;
     uint32 numperboard;
 }QIFA_SYS;

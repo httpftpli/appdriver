@@ -1,6 +1,7 @@
 
 #include "pf_can.h"
 #include "can_dmp.h"
+#include "can_wp.h"
 #include "list.h"
 #include <stdbool.h>
 #include <string.h>
@@ -37,7 +38,7 @@
 
 
 extern mmcsdCtrlInfo mmcsdctr[2];
-DMP_SYSTEM dmpSys = { .num = { 1, 2, 8, 1 },};
+DMP_SYSTEM dmpSys = { .num = { 1, 2, 8, 1, 1 },};
 
 
 static atomic setidflag,readidflag,jumptobootflag,presetidflag,jumptoappflag,eraseappflag,programdataflag,programendflag;
@@ -231,7 +232,7 @@ static void dmpDevDataClear(DMP_DEV *dev) {
 
 void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
     struct list_head *literal,*literal1,*n,*n1;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
         list_for_each_safe(literal, n, &sys->dev[i].regester) {
             DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
             list_for_each_safe(literal1, n1, devlist) {
@@ -324,9 +325,18 @@ void dmpSysDevCnt(unsigned int devtypeIndex, unsigned int *regedCnt, unsigned in
 }
 
 
-unsigned int dmpSysWillRegCnt(unsigned int typeindex) {
+unsigned int dmpSysWillRegCnt(unsigned int typeindex, uint32 *flag) {
     unsigned int regCnt = listCnt(&dmpSys.dev[typeindex].regester);
     unsigned int num = dmpSys.num[typeindex];
+    if (flag != NULL) {
+        *flag = (1<<num)-1;
+        struct list_head *literal;
+        DMP_DEV *dev;
+        list_for_each(literal, &dmpSys.dev[typeindex].regester) {
+            dev = list_entry(literal, DMP_DEV, list);
+            *flag &= ~(1<<(CAN_WP_GET_ID(dev->workid)-1));
+        }
+    }
     return num - regCnt;
 }
 
@@ -363,7 +373,7 @@ bool dmpHaveOffline(unsigned int devTypeIndex) {
             fg_offline = true;
         }
     } else {
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
             dmpSysDevCnt(i, &reg, &offline, &newadd, &unknow);
             if (offline > 0) {
                 fg_offline = true;
@@ -373,6 +383,22 @@ bool dmpHaveOffline(unsigned int devTypeIndex) {
 
     }
     return fg_offline;
+}
+
+uint32 dmpsysListOffline(unsigned int devTypeIndex, DMP_DEV **devbuf, uint32 num) {
+    struct list_head *literal;
+    DMP_DEV *dev;
+    int i = 0;
+    list_for_each(literal, &dmpSys.dev[devTypeIndex].regester) {
+        dev = list_entry(literal, DMP_DEV, list);
+        if (!(isDevOnline(dev))){
+            if (i < num) {
+                devbuf[i] = dev;
+            }
+            i++;
+        }
+    }
+    return i;
 }
 
 
@@ -396,7 +422,7 @@ bool dmpSysSave() {
     unsigned int *magic = (unsigned int *)buf;
     DMP_UID_ID *uid_id = (DMP_UID_ID *)(buf + 8);
     struct list_head *literal;
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
         list_for_each(literal, &dmpSys.dev[i].regester) {
             DMP_DEV *dev = list_entry(literal, DMP_DEV, list); ;
             uid_id[*num].uid = dev->uid;
@@ -558,15 +584,17 @@ void dmpUnregesterOffline(unsigned int devTypeIndex) {
     struct list_head *literal,*n;
     list_for_each_safe(literal, n, &dmpSys.dev[devTypeIndex].regester) {
         DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
-        dmpDevDataClear(dev);
-        list_move(literal, &devlistheadfree);
+        if (!isDevOnline(dev)) {
+            dmpDevDataClear(dev);
+            list_move(literal, &devlistheadfree);
+        }
     }
 }
 
 
 void dmpInit() {
     //init dmpSys dmpSysSave
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
         INIT_LIST_HEAD(&dmpSys.dev[i].regester);
         INIT_LIST_HEAD(&dmpSys.dev[i].newadd);
         INIT_LIST_HEAD(&dmpSys.dev[i].unknow);
@@ -584,7 +612,7 @@ bool dmpCheckDev() {
         dmpDevDataClear(dev);
         list_move(&dev->list, &devlistheadfree);
     }
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
         list_for_each_safe(literal, n, &dmpSys.dev[i].newadd) {
             DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
             dmpDevDataClear(dev);
@@ -645,7 +673,7 @@ void dmpCanRdDevVer(unsigned int devUid) {
     CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
 }
 
-bool dmpCanPreSetId(unsigned int devUid, bool val, unsigned int timeout) { 
+bool dmpCanPreSetId(unsigned int devUid, bool val, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 2;
