@@ -12,7 +12,7 @@
 #define CAN_WP_DEV_TYPE_QIFA    0x04
 #define CAN_WP_DEV_TYPE_SIFU    0x05
 
-
+#define CAN_WP_FUNCODE_HEARDBEATEN         0xfc
 #define CAN_WP_FUNCODE_HEARDBEAT           0xfe
 
 /*//motor
@@ -54,7 +54,7 @@ typedef struct {
 }CAN_WP;
 
 #define CAN_WP_GET_TYPE(ID) ((ID)>>6)
-#define CAN_WP_GET_ID(ID) ((ID) & 0x3f) 
+#define CAN_WP_GET_ID(ID) ((ID) & 0x3f)
 #define CAN_WP_ID(TYPE,id) ((TYPE)<<6 | (id))
 #define CAN_WP_ID_GROUP_BROADCAST(id) CAN_WP_ID(0x0f,(id))
 #define CAN_WP_ID_ALL_BROADCAST 0xff
@@ -66,6 +66,7 @@ typedef struct {
 
 
 extern bool wpHeartBeat(unsigned char id, unsigned int timeout,atomic *flag);
+
 
 
 #endif /*__CAN__WP__H__*/

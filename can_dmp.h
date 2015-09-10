@@ -3,6 +3,7 @@
 
 #include "list.h"
 #include <stdbool.h>
+#include "can_wp.h"
 
 
 
@@ -40,25 +41,31 @@
 
 
 
+#define DMP_DEV_HEARTBEAT_STATE_WAITE    1
+#define DMP_DEV_HEARTBEAT_STATE_OK       0
+#define DMP_DEV_HEARTBEAT_STATE_OK_MASK  1
+#define DMP_DEV_HEARTBEAT_STATE_TIMEOUT  (1<<8)
 
-
-typedef struct slave_dev {
+typedef struct slave_dev   DMP_DEV ;
+struct slave_dev {
     unsigned int stat;
     unsigned int hdtype;    //硬件类型
     unsigned char inboot;   //是否在boot
     unsigned char hdver;    //硬件版本
-    unsigned char customcode;
+    unsigned char customcode[10];
     unsigned char rombigver;
     unsigned short rommidver;
     unsigned short romlitver;
     unsigned int romtime;   //时间 time_t
     unsigned int uid;       //唯一 id
     unsigned short workid;  //工作id
-    unsigned short dummy2;
+    unsigned int timespan;
+    unsigned long long __timespan_;
+    bool (*heartBeat)(DMP_DEV *dev);
     struct list_head list;
     int ipacket;
     char desc[50];
-}DMP_DEV;
+};
 
 
 
@@ -117,10 +124,13 @@ typedef struct dmp_dev_help_{
 
 
 typedef struct dmp_system_ {
+    unsigned int typeNum;
     unsigned int num [DMP_DEV_HDTYPE_NUM];
     DMP_DEV_GROUP dev[DMP_DEV_HDTYPE_NUM];
     struct list_head  unknow;
+    struct list_head heartbeartreturnlist;
 } DMP_SYSTEM;
+
 
 extern DMP_SYSTEM dmpSys ;
 
@@ -173,8 +183,8 @@ extern bool dmpCheckDev();
 extern bool dmpSysSave();
 extern bool dmpAutoRegester(unsigned int devTypeIndex);
 extern uint32 dmpsysListOffline(unsigned int devTypeIndex,DMP_DEV **devbuf, uint32 num);
-extern bool dmpWillRegAuto(unsigned int devTypeIndex) ;
-extern bool dmpRegester(DMP_DEV *dev,unsigned int id);
+extern bool dmpWillRegAuto(unsigned int devTypeIndex);
+extern bool dmpRegester(DMP_DEV *dev, unsigned int id);
 extern void dmpSysDevCnt(unsigned int devtypeIndex, unsigned int *regedCnt,
                           unsigned int *offlineCnt,unsigned int *newCnt,
                           unsigned int *unknowCnt);
@@ -187,12 +197,21 @@ extern void composeDev(DMP_DEV *list1, DMP_DEV *list2, DMP_DEV_COMP resultList);
 extern void dmpUnregesterOffline(unsigned int devTypeIndex);
 extern bool dmpWillUnReg(unsigned int devTypeIndex) ;
 extern unsigned int dmpSysWillRegCnt(unsigned int typeindex, uint32 *flag);
+extern DMP_DEV *  dmpSysHeartbeat();
+extern void dmSetRegHook(unsigned int devTypeIndex, void (*hook)(DMP_DEV *));
+extern int32 wpDevHeartbeatEn(DMP_DEV *dev, bool en, bool (*heartbeart)(DMP_DEV *dev),unsigned int timeoutms);
+
+
+
+
 extern void dmpCanRdDevVer(unsigned int uid);
 //extern bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout);
 extern bool dmpCanPreSetId(unsigned int devUid,bool val, unsigned int timeout);
 extern bool dmpCanSetId(unsigned int devUid, unsigned short id, unsigned int timeout);
 extern bool dmpCanRcv(CAN_DMP *frame);
-extern bool dmpCanReadId(unsigned int devUid, unsigned short *id, unsigned int timeoutms);
+extern bool wpHeartBeartCanRcv(CAN_WP *frame);
+extern bool dmpCanReadId(unsigned int devUid, unsigned short *id,unsigned int timeoutms);
+extern int32 wpCanHeartbeatEn(unsigned int id, bool en, unsigned int timeoutms);
 extern bool praseDev(const char *desc, DMP_DEV *dev);
 
 

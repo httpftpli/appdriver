@@ -15,6 +15,7 @@
 #include "delay.h"
 #include "atomic.h"
 #include "algorithm.h"
+#include "debug.h"
 
 
 #define DMPDEV_INAND_SECTOR  USER_SECTOR+10
@@ -34,15 +35,21 @@
 #define DMP_FUNCODE_ProgramEnd      0xf6    //编程结束
 
 
+
 #define DEFINE_CAN_DMP_FRAME(FRAME)  CAN_DMP FRAME = {.flag = 0,.dir=0,.candir=0,.xtd=1,.dlc=1}
 
 
 extern mmcsdCtrlInfo mmcsdctr[2];
 DMP_SYSTEM dmpSys = { .num = { 1, 2, 8, 1, 1 },};
 
+void (*reghooks[DMP_DEV_HDTYPE_NUM])(DMP_DEV *dev);
 
-static atomic setidflag,readidflag,jumptobootflag,presetidflag,jumptoappflag,eraseappflag,programdataflag,programendflag;
+
+
+static atomic setidflag,readidflag,jumptobootflag,presetidflag,jumptoappflag,
+eraseappflag,programdataflag,programendflag,heartbeatflag,heartbeatenflag;
 unsigned short workid;
+unsigned int heartbeattimespan;
 int CanDmp_Return = 0;
 static bool str2month(const char *str, unsigned int *month) {
     if (strlen(str) >= 4) {
@@ -152,10 +159,10 @@ bool praseDev(const char *desc, DMP_DEV *dev) {
     dev->hdtype = *((unsigned int *)p) & 0x00ffffff;
     dev->hdver = *(unsigned char *)(p + 3);
     p = strtok(NULL, ".");
-    if ((p == NULL) || (strlen(p) > 4)) return false;
-    char ptemp[6] = { 0, 0, 0, 0, 0, 0 };
-    strncpy(ptemp, p, 5);
-    dev->customcode = *((unsigned int *)ptemp);
+    if ((p == NULL) || (strlen(p) > 9)) return false;
+    //char ptemp[6] = { 0, 0, 0, 0, 0, 0 };
+    strncpy((char *)dev->customcode, p, 9);
+    //dev->customcode = *((unsigned int *)ptemp);
     p = strtok(NULL, ".");
     if ((p == NULL) || (strlen(p) != 2)) return false;
     dev->rombigver = (unsigned char)strtol(p, NULL, 10);
@@ -179,6 +186,7 @@ bool praseDev(const char *desc, DMP_DEV *dev) {
 
 static LIST_HEAD(devlisthead);
 static LIST_HEAD(devlistheadfree);
+static LIST_HEAD(heartbeatlist);
 static void initDevList() {
     static DMP_DEV devpool[40];
     memset(devpool, 0, sizeof(devpool));
@@ -230,8 +238,11 @@ static void dmpDevDataClear(DMP_DEV *dev) {
 }
 
 
+static bool dmpdefaultheartbeart(DMP_DEV *dev);
+
 void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
     struct list_head *literal,*literal1,*n,*n1;
+    //compare to regester list
     for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
         list_for_each_safe(literal, n, &sys->dev[i].regester) {
             DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
@@ -240,10 +251,18 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
                 if ((devs->stat == DMP_DEV_PRASE_FINISH) && (devs->uid == dev->uid) && (devs->hdtype == dmpindex2devtype(i))) {
                     if (dev->inboot == 0 & dmpCanSetId(devs->uid, dev->workid, 50)) {
                         devs->stat |= DMP_DEV_DEV_ONLINE;
+                        devs->workid = dev->workid;
+                        //call regester hooks
+                        int typeindex = dmpdevtype2index(devs->hdtype);
+                        ASSERT(typeindex < DMP_DEV_HDTYPE_NUM);
+                        void (*reghook)(DMP_DEV *dev);
+                        reghook = reghooks[typeindex];
+                        if (reghook != NULL) {
+                            reghook(devs);
+                        }
                     } else {
                         dev->stat &= ~DMP_DEV_DEV_ONLINE;
                     }
-                    devs->workid = dev->workid;
                     list_del(&devs->list);
                     list_replace(&dev->list, &devs->list);
                     dmpDevDataClear(dev);
@@ -256,6 +275,7 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
             }
         }
     }
+    //compare to newadd list and unknow list
     list_for_each_safe(literal, n, devlist) {
         DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
         unsigned int index = dmpdevtype2index(dev->hdtype);
@@ -294,6 +314,17 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
             }
         }
     }
+    //enable heartbeart ,get heartbeart time param
+    /*for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+        list_for_each(literal, &sys->dev[i].regester) {
+            DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
+            int32 timespan = 0;
+            timespan = wpCanHeartbeatEn(dev->workid,1, 50);
+            if (timespan != -1) {
+                dmpDevSetHeartBeat(dev, dmpdefaultheartbeart, timespan);
+            }
+        }
+    }*/
 }
 
 
@@ -304,6 +335,17 @@ static unsigned int listCnt(struct list_head *head) {
         i++;
     }
     return i;
+}
+
+static int candmpsort(const struct list_head *a, const struct list_head *b) {
+    DMP_DEV *deva = list_entry(a, DMP_DEV, list);
+    DMP_DEV *devb = list_entry(b, DMP_DEV, list);
+    if (deva->workid > devb->workid) {
+        return 1;
+    } else if (deva->workid == devb->workid) {
+        return 0;
+    }
+    return -1;
 }
 
 
@@ -329,12 +371,12 @@ unsigned int dmpSysWillRegCnt(unsigned int typeindex, uint32 *flag) {
     unsigned int regCnt = listCnt(&dmpSys.dev[typeindex].regester);
     unsigned int num = dmpSys.num[typeindex];
     if (flag != NULL) {
-        *flag = (1<<num)-1;
+        *flag = (1 << num) - 1;
         struct list_head *literal;
         DMP_DEV *dev;
         list_for_each(literal, &dmpSys.dev[typeindex].regester) {
             dev = list_entry(literal, DMP_DEV, list);
-            *flag &= ~(1<<(CAN_WP_GET_ID(dev->workid)-1));
+            *flag &= ~(1 << (CAN_WP_GET_ID(dev->workid) - 1));
         }
     }
     return num - regCnt;
@@ -391,7 +433,7 @@ uint32 dmpsysListOffline(unsigned int devTypeIndex, DMP_DEV **devbuf, uint32 num
     int i = 0;
     list_for_each(literal, &dmpSys.dev[devTypeIndex].regester) {
         dev = list_entry(literal, DMP_DEV, list);
-        if (!(isDevOnline(dev))){
+        if (!(isDevOnline(dev))) {
             if (i < num) {
                 devbuf[i] = dev;
             }
@@ -451,7 +493,9 @@ void dmpSysStore() {
             continue;
         }
         DMP_DEV *dev = list_first_entry(&devlistheadfree, DMP_DEV, list);
-        list_move_tail(&dev->list, &dmpSys.dev[index].regester);
+        list_del(&dev->list);
+        list_sort_insert(&dev->list, &dmpSys.dev[index].regester, candmpsort);
+        //list_move_tail(&dev->list, &dmpSys.dev[index].regester);
         dev->uid = uid_id[i].uid;
         dev->workid = uid_id[i].id;
         dev->hdtype = uid_id[i].hdtype;
@@ -490,16 +534,6 @@ bool dmpAutoPreRegester(unsigned int devTypeIndex, unsigned int *id, DMP_DEV **n
 }
 
 
-static int candmpsort(const struct list_head *a, const struct list_head *b) {
-    DMP_DEV *deva = list_entry(a, DMP_DEV, list);
-    DMP_DEV *devb = list_entry(b, DMP_DEV, list);
-    if (deva->workid > devb->workid) {
-        return 1;
-    } else if (deva->workid == devb->workid) {
-        return 0;
-    }
-    return -1;
-}
 
 bool dmpAutoRegester(unsigned int devTypeIndex) {
     unsigned int devType = dmpindex2devtype(devTypeIndex);
@@ -509,14 +543,10 @@ bool dmpAutoRegester(unsigned int devTypeIndex) {
     devn = list_first_entry(&dmpSys.dev[devTypeIndex].newadd, DMP_DEV, list);
     unsigned int id = devr->workid;
     bool r;
-    r = dmpCanSetId(devn->uid, id, 50);
+    r = dmpRegester(devn, id);
     if (r == false) {
         return r;
     }
-    devn->stat |= DMP_DEV_DEV_ONLINEMASK;
-    devn->workid = id;
-    //list_sort_insert(&devn->list, &dmpSys.dev[devTypeIndex].regester,candmpsort);
-    list_move_tail(&devn->list, &dmpSys.dev[devTypeIndex].regester);
     dmpDevDataClear(devr);
     list_move(&devr->list, &devlistheadfree);
     return true;
@@ -544,13 +574,36 @@ bool dmpRegester(DMP_DEV *dev, unsigned int id) {
     unsigned int uid = dev->uid;
     if (!dmpCanSetId(uid, id, 50)) return false;                //原来为30  出现未等到回码现象后修改为50
     dev->workid = id;
-    //list_sort_insert(&dev->list, &devtype2devgroup(dev->hdtype)->regester,candmpsort);
-    list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->regester);
+    list_del(&dev->list);
+    list_sort_insert(&dev->list, &devtype2devgroup(dev->hdtype)->regester, candmpsort);
+    //list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->regester);
     dev->stat |= DMP_DEV_DEV_ONLINE;
+    //call regester hook;
+    int typeindex = dmpdevtype2index(dev->hdtype);
+    ASSERT(typeindex < DMP_DEV_HDTYPE_NUM);
+    void (*reghook)(DMP_DEV *dev);
+    reghook = reghooks[typeindex];
+    if (reghook != NULL) {
+        reghook(dev);
+    }
+    //set heartbeat
+    /*int32 timespan = wpCanHeartbeatEn(dev->workid,1, 50);
+    if (timespan > 0) {
+        dev->timespan = timespan;
+        dev->heartBeat = dmpdefaultheartbeart;
+    } else {
+        dev->timespan = 0;
+        dev->heartBeat = NULL;
+    }*/
     return true;
 }
 
 
+
+void dmpDevSetRegHook(unsigned int devTypeIndex, void (*hook)(DMP_DEV *)) {
+    ASSERT(devTypeIndex < DMP_DEV_HDTYPE_NUM);
+    reghooks[devTypeIndex] = hook;
+}
 
 
 bool dmpUnRegester1(unsigned int devTypeIndex, unsigned int workId) {
@@ -581,7 +634,7 @@ bool dmpUnregester2(unsigned int devTypeIndex) {
 }
 
 void dmpUnregesterOffline(unsigned int devTypeIndex) {
-    struct list_head *literal,*n;
+    struct list_head *literal, *n;
     list_for_each_safe(literal, n, &dmpSys.dev[devTypeIndex].regester) {
         DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
         if (!isDevOnline(dev)) {
@@ -590,6 +643,36 @@ void dmpUnregesterOffline(unsigned int devTypeIndex) {
         }
     }
 }
+
+static void dmpDevSetHeartBeat(DMP_DEV *dev, BOOL(*heartBeat)(DMP_DEV *dev), uint32 timespan) {
+    dev->heartBeat = heartBeat;
+    dev->timespan = timespan;
+    dev->__timespan_ = TimerTickGet64();
+}
+
+int32 wpDevHeartbeatEn(DMP_DEV *dev, bool en, bool (*heartbeart)(DMP_DEV *dev), unsigned int timeoutms) {
+    if (dev == NULL) {
+        return -1;
+    }
+    unsigned int id = dev->workid;
+    /*if (en==false&&dev->timespan>0&&dev->heartBeat!=NULL) {
+        dev->heartBeat(dev);
+    }*/
+    int timespan;
+    int r = timespan = wpCanHeartbeatEn(id, en, timeoutms);
+    if (timespan == -1) {
+        timespan = 0;
+    }
+    if (!en) {
+        timespan = 0;
+    }
+    if (heartbeart == NULL) {
+        heartbeart = dmpdefaultheartbeart;
+    }
+    dmpDevSetHeartBeat(dev, heartbeart, timespan);
+    return en ? r : 0;
+}
+
 
 
 void dmpInit() {
@@ -600,9 +683,57 @@ void dmpInit() {
         INIT_LIST_HEAD(&dmpSys.dev[i].unknow);
     }
     INIT_LIST_HEAD(&dmpSys.unknow);
+    INIT_LIST_HEAD(&dmpSys.heartbeartreturnlist);
     initDevList();
     dmpSysStore();
 }
+
+
+#define HEARTBEAT_RETURN_TIMEOUT   10 //MS
+static uint16 heartbeart_id,heartbeart_en_id;
+static bool dmpdefaultheartbeart(DMP_DEV *dev) {
+    DEFINE_CAN_WP_FRAME(frame);
+    frame.funcode = CAN_WP_FUNCODE_HEARDBEAT;
+    heartbeart_id = frame.desid = dev->workid;
+    frame.dlc = 0;
+    atomicClear(&heartbeatflag);
+    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    withintimedo(tmark, HEARTBEAT_RETURN_TIMEOUT) {
+        if (atomicTestClear(&heartbeatflag)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+
+
+
+
+DMP_DEV* dmpSysHeartbeat() {
+    NOT_IN_IRQ();
+    struct list_head *p;
+    DMP_DEV *dev;
+    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+        list_for_each(p, &dmpSys.dev[i].regester) {
+            dev = list_entry(p, DMP_DEV, list);
+            if (!isDevOnline(dev) || dev->timespan == 0) continue;
+            unsigned long long timertick = TimerTickGet64();
+            if (timertick >= dev->__timespan_) {
+                dev->__timespan_ = timertick + dev->timespan;
+                if (dev->heartBeat) {
+                    if (dev->heartBeat(dev)) {
+                        return NULL;
+                    } else {
+                        return dev;
+                    }
+                }
+            }
+        }
+    }
+    return NULL;
+}
+
 
 bool dmpCheckDev() {
     //broadcast read device version
@@ -723,6 +854,7 @@ bool dmpCanSetId(unsigned int devUid, unsigned short id, unsigned int timeout) {
     return false;
 }
 
+
 //#########################################################################
 bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
@@ -785,6 +917,7 @@ bool dmpCanProgramDate(unsigned int devUid, unsigned int baohao, unsigned char c
     }
     return false;
 }
+
 bool dmpCanProgramEnd(unsigned int devUid, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
@@ -796,6 +929,47 @@ bool dmpCanProgramEnd(unsigned int devUid, unsigned int timeout) {
         if (atomicTestClear(&programendflag)) {
             return true;
         }
+    }
+    return false;
+}
+
+
+
+int32 wpCanHeartbeatEn(unsigned int id, bool en, unsigned int timeoutms) {
+    DEFINE_CAN_WP_FRAME(frame);
+    frame.desid = id;
+    frame.dlc = 1;
+    frame.data[0] = !!en;
+    frame.funcode = (unsigned char)CAN_WP_FUNCODE_HEARDBEATEN;
+    heartbeart_en_id = id;
+    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    atomicClear(&heartbeatenflag);
+    withintimedo(tmark, timeoutms) {
+        if (atomicTestClear(&heartbeatenflag)) {
+            return heartbeattimespan;
+        }
+    }
+    return -1;
+}
+
+
+bool wpHeartBeartCanRcv(CAN_WP *frame) {
+    switch (frame->funcode) {
+    case CAN_WP_FUNCODE_HEARDBEAT:
+        if (heartbeart_id == frame->srcid) {
+            atomicSet(&heartbeatflag);
+            return true;
+        }
+        break;
+    case CAN_WP_FUNCODE_HEARDBEATEN:
+        if (heartbeart_en_id == frame->srcid) {
+            atomicSet(&heartbeatenflag);
+            heartbeattimespan = (unsigned short)frame->data[0] & 0xffff;
+            return true;
+        }
+        break;
+    default:
+        break;
     }
     return false;
 }

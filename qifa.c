@@ -477,7 +477,7 @@ static QIFA __QiFa_Reg[200]
 
 
 static RINGBUF qifaringbuf;
-static QIFA_VAL qifavalbuf[300];
+static QIFA_VAL qifavalbuf[400];
 
 
 
@@ -526,7 +526,7 @@ typedef struct {
 
 #define QIFA_FLAG    0xaa55
 
-static wchar __qifaname[1000];
+static wchar __qifaname[20000];
 
 static bool __qifainit(QIFA_SYS *qifasys) {
     QIFA *qifa = qifasys->QiFa_Reg = __QiFa_Reg;
@@ -567,12 +567,12 @@ static bool __qifainit(QIFA_SYS *qifasys) {
         qifa[i].board_id = qifapack.board_id;
         qifa[i].xuhao = qifapack.xuhao;
         qifa[i].nc_no = qifa[i].default_nc_no = qifapack.default_nc_no;
-        qifa[i].nc_no_changeable = qifapack.nc_no_dis;
-        qifa[i].nc_no_en = qifapack.nc_no_changeable;
+        qifa[i].nc_no_changeable = qifapack.nc_no_changeable;
+        qifa[i].nc_no_display = qifapack.nc_no_dis;
         qifa[i].cam_en = qifapack.iscam;
         qifa[i].flag = QIFA_FLAG;
         for (int j=0;j<13;j++) {
-            if (qifapack.qifa_name_offset[i]!=-1UL) {
+            if (qifapack.qifa_name_offset[j]!=-1UL) {
                 qifa[i].name[j] = &__qifaname[qifapack.qifa_name_offset[j] / 2];
             }else{
                 qifa[i].name[j] = &__qifaname[qifapack.qifa_name_offset[0] / 2];
@@ -589,14 +589,10 @@ static bool __qifainit(QIFA_SYS *qifasys) {
 
 
 bool qifaInit() {
-    //qifaSys.QiFa_Reg = __QiFa_Reg;
-    //qifaSys.numofboard = 10;
-    //qifaSys.numperboard = 16;
-    //int num;
     if (__qifainit(&qifaSys) == false) {
         return false;
     }
-    for (uint32 i = 0; i < lenthof(__QiFa_Reg); i++) {
+    for (uint32 i = 0; i < qifaSys.numofqifa; i++) {
 
         ///////////////////////////////////////
         qifaSys.QiFa_Reg[i].flag = QIFA_FLAG;
@@ -633,7 +629,7 @@ wchar * qifaName(QIFA *qifa ,uint32 nameindex) {
 
 
 void qifaSet(QIFA *qifa, uint32 val){
-    ASSERT(qifa->flag == QIFA_FLAG);
+    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
     QIFA_VAL qifa_val;
     qifa_val.qifa = qifa;
     qifa_val.val = !!val;
@@ -681,7 +677,7 @@ uint32 qifaRead2(uint32 wpId, bool comm) {
 
 
 int32 qifaReadIo(QIFA * qifa, bool comm) {
-    ASSERT(qifa->flag == QIFA_FLAG);
+    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
     return(!!qifa->inout) ^ (!!qifa->nc_no);
 }
 
@@ -712,7 +708,7 @@ uint32 qifaReadIo2(uint32 wpId, bool comm) {
 
 
 uint32 qifaBak(QIFA * qifa) {
-    ASSERT(qifa->flag == QIFA_FLAG);
+    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
     return qifa->inout_bak = qifa->inout;
 }
 
@@ -726,7 +722,7 @@ uint32 qifaBak2(uint32 wpId) {
 
 
 void qifaRestore(QIFA * qifa) {
-    ASSERT(qifa->flag == QIFA_FLAG);
+    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
     qifaSet(qifa, qifa->inout_bak);
 }
 
@@ -757,7 +753,7 @@ void qifaProcess() {
             break;
         }
         qifa = qifaval.qifa;
-        ASSERT(qifa->flag == QIFA_FLAG);
+        ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
         val = qifa->inout = qifaval.val;
         qifaguilei[qifa->board_id].data_value[qifaguilei[qifa->board_id].num]
         = (uint8)((val ^ !!qifa->nc_no) << 7 | qifa->xuhao);

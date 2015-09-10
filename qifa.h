@@ -6,6 +6,7 @@
 #include <wchar.h>
 #include "type.h"
 #include "algorithm.h"
+#include "can_dmp.h"
 
 
 
@@ -349,7 +350,7 @@ typedef struct
     unsigned short nc_no:1;
     unsigned short default_nc_no:1;
     unsigned short nc_no_changeable:1;
-    unsigned short nc_no_en:1;
+    unsigned short nc_no_display:1;
     unsigned short reset_f0_inout:1;
     unsigned short cam_en:1;
     unsigned short flag;
@@ -357,9 +358,17 @@ typedef struct
 }QIFA;
 
 
+typedef struct{
+    unsigned int numOfQifa;
+    QIFA qifa[16];
+    DMP_DEV *dmpdev;
+}QIFA_BOARD;
+
+
 typedef struct {
     QIFA *QiFa_Reg;
     QIFA *QiFa_Reg_Table[10][16];
+    QIFA_BOARD *board[10];
     uint32 numofqifa;
     uint32 numofboard;
     uint32 numperboard;
