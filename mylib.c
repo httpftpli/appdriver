@@ -1,16 +1,153 @@
-#include <stdio.h>
-#include <stdlib.h>
+//#include <stdio.h>
+//#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
+//#include <ctype.h>
+#include "mylib.h"
+//#include "stdafx.h"
 
 
-unsigned char *pfile;
-unsigned char *outfile;
-unsigned int tsize = 0;
-unsigned int csize = 0;
-unsigned int source_len;
-unsigned int source_pos;
-unsigned char p_len[64] = {
+
+#define EXIT_OK 0
+#define EXIT_FAILED -1
+///////////数据类型定义
+typedef unsigned char BOOLEAN;
+typedef unsigned char INT8U;                    /* Unsigned  8 bit quantity                           */
+typedef signed char INT8S;                    /* Signed    8 bit quantity                           */
+typedef unsigned short INT16U;                 /* Unsigned 16 bit quantity                           */
+typedef signed short INT16S;                 /* Signed   16 bit quantity                           */
+typedef unsigned int INT32U;                   /* Unsigned 32 bit quantity                           */
+typedef signed long INT32S;                   /* Signed   32 bit quantity                           */
+typedef float FP32;                     /* Single precision floating point                    */
+typedef double FP64;                     /* Double precision floating point                    */
+
+typedef unsigned int OS_STK;                   /* Each stack entry is 16-bit wide                    */
+typedef unsigned int OS_CPU_SR;                /* Define size of CPU status register (PSR = 32 bits) */
+
+#define BYTE           INT8S                     /* Define data types for backward compatibility ...   */
+#define UBYTE          INT8U                     /* ... to uC/OS V1.xx.  Not actually needed for ...   */
+#define WORD           INT16S                    /* ... uC/OS-II.                                      */
+#define UWORD          INT16U
+#define LONG           INT32S
+#define ULONG          INT32U
+///////////////////////
+
+
+//FILE *infile, *outfile;
+INT32U textsize = 0, codesize = 0, printcount = 0;
+
+
+/* LZSS Parameters */
+
+#define N       4096    /* Size of string buffer */
+#define F       60  /* Size of look-ahead buffer */
+#define THRESHOLD   2
+#define NIL     N   /* End of tree's node  */
+
+INT8U
+text_buf[N + F - 1];
+INT16S match_position, match_length,
+lson[N + 1], rson[N + 257], dad[N + 1];
+
+void InitTree(void) {  /* Initializing tree */
+    INT16S i;
+
+    for (i = N + 1; i <= N + 256; i++) rson[i] = NIL;          /* root */
+    for (i = 0; i < N; i++) dad[i] = NIL;           /* node */
+}
+
+void InsertNode(INT16S r) {  /* Inserting node to the tree */
+    INT16S i, p, cmp;
+    INT8U *key;
+    INT16U c;
+
+    cmp = 1;
+    key = &text_buf[r];
+    p = N + 1 + key[0];
+    rson[r] = lson[r] = NIL;
+    match_length = 0;
+    for (;;) {
+        if (cmp >= 0) {
+            if (rson[p] != NIL) p = rson[p];
+            else {
+                rson[p] = r;
+                dad[r] = p;
+                return;
+            }
+        } else {
+            if (lson[p] != NIL) p = lson[p];
+            else {
+                lson[p] = r;
+                dad[r] = p;
+                return;
+            }
+        }
+        for (i = 1; i < F; i++) if ((cmp = key[i] - text_buf[p + i]) != 0) break;
+        if (i > THRESHOLD) {
+            if (i > match_length) {
+                match_position = ((r - p) & (N - 1)) - 1;
+                if ((match_length = i) >= F) break;
+            }
+            if (i == match_length) {
+                if ((c = ((r - p) & (N - 1)) - 1) < match_position) {
+                    match_position = c;
+                }
+            }
+        }
+    }
+    dad[r] = dad[p];
+    lson[r] = lson[p];
+    rson[r] = rson[p];
+    dad[lson[p]] = r;
+    dad[rson[p]] = r;
+    if (rson[dad[p]] == p) rson[dad[p]] = r;
+    else lson[dad[p]] = r;
+    dad[p] = NIL;  /* remove p */
+}
+
+void DeleteNode(INT16S p) {  /* Deleting node from the tree */
+    INT16S q;
+
+    if (dad[p] == NIL) return;         /* unregistered */
+    if (rson[p] == NIL) q = lson[p];
+    else if (lson[p] == NIL) q = rson[p];
+    else {
+        q = lson[p];
+        if (rson[q] != NIL) {
+            do {
+                q = rson[q];
+            } while (rson[q] != NIL);
+            rson[dad[q]] = lson[q];
+            dad[lson[q]] = dad[q];
+            lson[q] = lson[p];
+            dad[lson[p]] = q;
+        }
+        rson[q] = rson[p];
+        dad[rson[p]] = q;
+    }
+    dad[q] = dad[p];
+    if (rson[dad[p]] == p) rson[dad[p]] = q;
+    else lson[dad[p]] = q;
+    dad[p] = NIL;
+}
+
+/* Huffman coding parameters */
+
+#define N_CHAR      (256 - THRESHOLD + F)
+/* character code (= 0..N_CHAR-1) */
+#define T       (N_CHAR * 2 - 1)    /* Size of table */
+#define R       (T - 1)         /* root position */
+#define MAX_FREQ    0x8000
+/* update when cumulative frequency */
+/* reaches to this value */
+
+typedef INT8U uchar;
+
+/*
+ * Tables for encoding/decoding upper 6 bits of
+ * sliding dictionary pointer
+ */
+/* encoder table */
+uchar p_len[64] = {
     0x03, 0x04, 0x04, 0x04, 0x05, 0x05, 0x05, 0x05,
     0x05, 0x05, 0x05, 0x05, 0x06, 0x06, 0x06, 0x06,
     0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06,
@@ -19,9 +156,9 @@ unsigned char p_len[64] = {
     0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07, 0x07,
     0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
     0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08
-}; 
+};
 
-unsigned char p_code[64] = {
+uchar p_code[64] = {
     0x00, 0x20, 0x30, 0x40, 0x50, 0x58, 0x60, 0x68,
     0x70, 0x78, 0x80, 0x88, 0x90, 0x94, 0x98, 0x9C,
     0xA0, 0xA4, 0xA8, 0xAC, 0xB0, 0xB4, 0xB8, 0xBC,
@@ -33,7 +170,7 @@ unsigned char p_code[64] = {
 };
 
 /* decoder table */
-unsigned char d_code[256] = {
+uchar d_code[256] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -68,7 +205,7 @@ unsigned char d_code[256] = {
     0x38, 0x39, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,
 };
 
-unsigned char d_len[256] = {
+uchar d_len[256] = {
     0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
     0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
     0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
@@ -102,188 +239,83 @@ unsigned char d_len[256] = {
     0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
     0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x08,
 };
-#define nx      4096
-#define fn       60
-#define TRD   	2
-#define NIL     nx
-unsigned char buf_out[nx + fn - 1];
-signed short match_position, match_length;
 
-signed short lson[nx + 1], rson[nx + 257], dad[nx + 1];
-#define N_CHAR      (256 - TRD + fn)
+INT16U freq[T + 1]; /* cumulative freq table */
 
-#define T       (N_CHAR * 2 - 1)
-#define R       (T - 1)
-#define MAX_FREQ    0x8000
-unsigned short freq[T + 1];
-signed short prnt[T + N_CHAR];
-signed short son[T];
-unsigned short getbuf = 0;
-unsigned char getlen = 0;
-unsigned short putbuf = 0;
-unsigned char putlen = 0;
+/*
+ * pointing parent nodes.
+ * area [T..(T + N_CHAR - 1)] are pointers for leaves
+ */
+INT16S prnt[T + N_CHAR];
+
+/* pointing children nodes (son[], son[] + 1)*/
+INT16S son[T];
+
+INT16U getbuf = 0;
+INT8U getlen = 0;
 
 
-void Init(void) {
-    signed short i;
+static INT32U p = 0;
 
-    for (i = nx + 1; i <= nx + 256; i++) rson[i] = NIL;
-    for (i = 0; i < nx; i++) dad[i] = NIL;
-}
-
-void InNode(signed short r) {
-    signed short i, p, cmp;
-    unsigned char *key;
-    unsigned short c;
-
-    cmp = 1;
-    key = &buf_out[r];
-    p = nx + 1 + key[0];
-    rson[r] = lson[r] = NIL;
-    match_length = 0;
-    for (;;) {
-        if (cmp >= 0) {
-            if (rson[p] != NIL) p = rson[p];
-            else {
-                rson[p] = r;
-                dad[r] = p;
-                return;
-            }
-        } else {
-            if (lson[p] != NIL) p = lson[p];
-            else {
-                lson[p] = r;
-                dad[r] = p;
-                return;
-            }
-        }
-        for (i = 1; i < fn; i++) if ((cmp = key[i] - buf_out[p + i]) != 0) break;
-        if (i > TRD) {
-            if (i > match_length) {
-                match_position = ((r - p) & (nx - 1)) - 1;
-                if ((match_length = i) >= fn) break;
-            }
-            if (i == match_length) {
-                if ((c = ((r - p) & (nx - 1)) - 1) < match_position) {
-                    match_position = c;
-                }
-            }
-        }
-    }
-    dad[r] = dad[p];
-    lson[r] = lson[p];
-    rson[r] = rson[p];
-    dad[lson[p]] = r;
-    dad[rson[p]] = r;
-    if (rson[dad[p]] == p) rson[dad[p]] = r;
-    else lson[dad[p]] = r;
-    dad[p] = NIL;
-}
-
-void DeNode(signed short p) {
-    signed short q;
-
-    if (dad[p] == NIL) return;
-    if (rson[p] == NIL) q = lson[p];
-    else if (lson[p] == NIL) q = rson[p];
-    else {
-        q = lson[p];
-        if (rson[q] != NIL) {
-            do {
-                q = rson[q];
-            } while (rson[q] != NIL);
-            rson[dad[q]] = lson[q];
-            dad[lson[q]] = dad[q];
-            lson[q] = lson[p];
-            dad[lson[p]] = q;
-        }
-        rson[q] = rson[p];
-        dad[rson[p]] = q;
-    }
-    dad[q] = dad[p];
-    if (rson[dad[p]] == p) rson[dad[p]] = q;
-    else lson[dad[p]] = q;
-    dad[p] = NIL;
-}
-
-
-
-
-signed short GetBit(void) {
-    signed short i;
-
+INT16S GetBit(void *buf) { /* get one bit */
+    INT16S i;
+    char *buf_t = (char *)buf;
     while (getlen <= 8) {
-
-        i = *pfile;
-        if (source_pos >= source_len) i = 0;
-        else {
-            source_pos++;
-            pfile++;
-        }
-
-
-
-        getbuf |= (i << (8 - getlen));
+        i = buf_t[p++];
+        if (i < 0) i = 0;
+        //printf(" Infile Positon: %ld \n", ftell(infile));
+        getbuf |= i << (8 - getlen);
         getlen += 8;
     }
     i = getbuf;
-    getbuf = getbuf << 1;
+    getbuf <<= 1;
     getlen--;
     return(i < 0);
 }
 
-signed short GetByte(void) {
-    signed short i;
-    unsigned short ii;
+INT16S GetByte(void *buf) {    /* get a byte */
+    INT16U i;
+    char *buf_t = (char *)buf;
     while (getlen <= 8) {
-
-        i = *pfile;
-        if (source_pos >= source_len) i = 0;
-        else {
-            source_pos++;
-            pfile++;
-        }
-
-        getbuf |= (i << (8 - getlen));
+        i = buf_t[p++];
+        //if (i < 0) i = 0;
+        //printf(" Infile Positon: %ld \n", ftell(infile));
+        getbuf |= i << (8 - getlen);
         getlen += 8;
     }
     i = getbuf;
-    getbuf = getbuf << 8;
+    getbuf <<= 8;
     getlen -= 8;
-    ii = (i >> 8) & 0x00ff;
-    return(ii);
+    return i >> 8;
 }
 
+INT16U putbuf = 0;
+uchar putlen = 0;
 
-
-void Put_code(signed short l, unsigned short c) {
+/*void Putcode(INT16S l, INT16U c) {
     putbuf |= c >> putlen;
     if ((putlen += l) >= 8) {
-
-        *outfile = putbuf >> 8;
-        outfile++;
-
+        putc(putbuf >> 8, outfile);
+        printf("Positon: %ld \n", ftell(outfile));
         if ((putlen -= 8) >= 8) {
-
-            *outfile = putbuf;
-            outfile++;
-
-            csize += 2;
+            putc(putbuf, outfile);
+            printf("Positon: %ld \n", ftell(outfile));
+            codesize += 2;
             putlen -= 8;
             putbuf = c << (l - putlen);
 
         } else {
             putbuf <<= 8;
-            csize++;
+            codesize++;
         }
     }
-}
+} */
 
 
+/* initialize freq tree */
 
-
-void StartExec() {
-    signed short i, j;
+void StartHuff() {
+    INT16S i, j;
 
     for (i = 0; i < N_CHAR; i++) {
         freq[i] = 1;
@@ -302,13 +334,13 @@ void StartExec() {
 }
 
 
-
+/* reconstruct freq tree */
 
 void reconst() {
-    signed short i, j, k;
-    unsigned short f, l;
+    INT16S i, j, k;
+    INT16U f, l;
 
-
+    /* halven cumulative freq for leaf nodes */
     j = 0;
     for (i = 0; i < T; i++) {
         if (son[i] >= T) {
@@ -317,7 +349,7 @@ void reconst() {
             j++;
         }
     }
-
+    /* make a tree : first, connect children nodes */
     for (i = 0, j = N_CHAR; j < T; i += 2, j++) {
         k = i + 1;
         f = freq[j] = freq[i] + freq[k];
@@ -325,14 +357,17 @@ void reconst() {
         k++;
         l = (j - k) * 2;
 
+        /* movmem() is Turbo-C dependent
+           rewritten to memmove() by Kenji */
 
+        /* movmem(&freq[k], &freq[k + 1], l);*/
         (void)memmove(&freq[k + 1], &freq[k], l);
         freq[k] = f;
-
+        /* movmem(&son[k], &son[k + 1], l); */
         (void)memmove(&son[k + 1], &son[k], l);
         son[k] = i;
     }
-
+    /* connect parent nodes */
     for (i = 0; i < T; i++) {
         if ((k = son[i]) >= T) {
             prnt[k] = i;
@@ -343,10 +378,10 @@ void reconst() {
 }
 
 
+/* update freq tree */
 
-
-void update(signed short c) {
-    signed short i, j, k, l;
+void update(INT16S c) {
+    INT16S i, j, k, l;
 
     if (freq[R] == MAX_FREQ) {
         reconst();
@@ -355,6 +390,7 @@ void update(signed short c) {
     do {
         k = ++freq[c];
 
+        /* swap nodes to keep the tree freq-ordered */
         if (k > freq[l = c + 1]) {
             while (k > freq[++l]);
             l--;
@@ -374,58 +410,73 @@ void update(signed short c) {
 
             c = l;
         }
-    } while ((c = prnt[c]) != 0);
+    } while ((c = prnt[c]) != 0);   /* do it until reaching the root */
 }
 
-unsigned short code, len;
+INT16U code, len;
 
-void EncodeChar(unsigned short c) {
-    unsigned short i;
-    signed short j, k;
+#if 0
+void EncodeChar(INT16U c) {
+    INT16U i;
+    INT16S j, k;
 
     i = 0;
     j = 0;
     k = prnt[c + T];
+
+    /* search connections from leaf node to the root */
     do {
         i >>= 1;
+
+        /*
+        if node's address is odd, output 1
+        else output 0
+        */
         if (k & 1) i += 0x8000;
+
         j++;
     } while ((k = prnt[k]) != R);
-    Put_code(j, i);
+    Putcode(j, i);
     code = i;
     len = j;
     update(c);
 }
 
-void EncodePos(unsigned short c) {
-    unsigned short i;
 
 
+void EncodePosition(INT16U c) {
+    INT16U i;
+
+    /* output upper 6 bits with encoding */
     i = c >> 6;
-    Put_code(p_len[i], (unsigned)p_code[i] << 8);
+    Putcode(p_len[i], (unsigned)p_code[i] << 8);
 
-
-    Put_code(6, (c & 0x3f) << 10);
+    /* output lower 6 bits directly */
+    Putcode(6, (c & 0x3f) << 10);
 }
 
 void EncodeEnd() {
     if (putlen) {
-
-        *outfile = putbuf >> 8;
-        outfile++;
-
-        csize++;
+        putc(putbuf >> 8, outfile);
+        printf("Positon: %ld \n", ftell(outfile));
+        codesize++;
     }
 }
 
-signed short DecodeChar() {
-    unsigned short c;
+#endif
+
+INT16S DecodeChar(void *buf) {
+    INT16U c;
 
     c = son[R];
 
-
+    /*
+     * start searching tree from the root to leaves.
+     * choose node #(son[]) if input bit == 0
+     * else choose #(son[]+1) (input bit == 1)
+     */
     while (c < T) {
-        c += GetBit();
+        c += GetBit(buf);
         c = son[c];
     }
     c -= T;
@@ -433,76 +484,131 @@ signed short DecodeChar() {
     return c;
 }
 
-signed short DecodePos() {
-    unsigned short i, j, c;
-    i = 0;
-    i = GetByte();
-    c = d_code[i] << 6;
+INT16S DecodePosition(void *buf) {
+    INT16U i, j, c;
+
+    /* decode upper 6 bits from given table */
+    i = GetByte(buf);
+    c = (unsigned)d_code[i] << 6;
     j = d_len[i];
 
+    /* input lower 6 bits directly */
     j -= 2;
     while (j--) {
-        i = (i << 1) + GetBit();
+        i = (i << 1) + GetBit(buf);
     }
-    return(c | i & 0x3f);
+    return c | i & 0x3f;
 }
-//unsigned short cbuf[2048];
-//unsigned int kk,pp;
-unsigned int Decrypt(unsigned char *in, unsigned int len, unsigned char *out) {
-    signed short i, j, k, r, c, f;
-    unsigned int count;
-    tsize = 0;
-    csize = 0;
 
+/* Compression */
+#if 0
+void Encode(void) {  /* Encoding/Compressing */
+    INT16S i, c, len, r, s, last_match_length;
+
+    fseek(infile, 0L, 2);
+    textsize = ftell(infile);
+    if (fwrite(&textsize, sizeof(textsize), 1, outfile) < 1) Error("Unable to write");   /* write size of original text */
+    if (textsize == 0) return;
+    rewind(infile);
+    textsize = 0;           /* rewind and rescan */
+    StartHuff();
+    InitTree();
+    s = 0;
+    r = N - F;
+    for (i = s; i < r; i++) text_buf[i] = ' ';
+    for (len = 0; len < F && (c = getc(infile)) != EOF; len++) {
+        printf(" Infile Positon: %ld \n", ftell(infile));
+        text_buf[r + len] = c;
+    }
+    textsize = len;
+    for (i = 1; i <= F; i++) InsertNode(r - i);
+    InsertNode(r);
+    do {
+        if (match_length > len) match_length = len;
+        if (match_length <= THRESHOLD) {
+            match_length = 1;
+            EncodeChar(text_buf[r]);
+        } else {
+            EncodeChar(255 - THRESHOLD + match_length);
+            EncodePosition(match_position);
+        }
+        last_match_length = match_length;
+        for (i = 0; i < last_match_length && (c = getc(infile)) != EOF; i++) {
+            printf(" Infile Positon: %ld \n", ftell(infile));
+            DeleteNode(s);
+            text_buf[s] = c;
+            if (s < F - 1) text_buf[s + N] = c;
+            s = (s + 1) & (N - 1);
+            r = (r + 1) & (N - 1);
+            InsertNode(r);
+        }
+        if ((textsize += i) > printcount) {
+            printf("%12ld\r", textsize);
+            printcount += 1024;
+        }
+        while (i++ < last_match_length) {
+            DeleteNode(s);
+            s = (s + 1) & (N - 1);
+            r = (r + 1) & (N - 1);
+            if (--len) InsertNode(r);
+        }
+    } while (len > 0);
+    EncodeEnd();
+    printf("input: %ld bytes\n", textsize);
+    printf("output: %ld bytes\n", codesize);
+    printf("output/input: %.3f\n", (double)codesize / textsize);
+}
+#endif
+
+void coDecrypt(void *buf, INT32U len, void *debuf){  /* Decoding/Uncompressing */
+    INT16S i, j, k, r, c;
+    p = 0;
     getbuf = 0;
     getlen = 0;
-    putbuf = 0;
-    putlen = 0;
-
-    //memset(&cbuf[0],0,2048);
-    pfile = in;
-    tsize = *pfile;
-    pfile++;
-    tsize = tsize + (*pfile) * 256;
-    pfile = in;
-    pfile = in + 4;
-    outfile = out;
-    source_len = len;
-    source_pos = 0;
-    if (tsize == 0) return 0;
-    StartExec();
-    for (i = 0; i < nx - fn; i++) buf_out[i] = 0;
-    r = nx - fn;
-    for (count = 0; count < tsize;) {
-        c = DecodeChar();
-        //cbuf[kk]=c;
-        //kk++;
-        //if (kk>296)
-        //	pp=90;
+    INT32U count;
+    char *buf_t = buf;
+    char *out = debuf;
+    textsize = *(INT32U *)buf;
+    if (textsize == 0)
+        return;
+    StartHuff();
+    for (i = 0; i < N - F; i++)
+        text_buf[i] = ' ';
+    r = N - F;
+    for (count = 0; count < textsize; ) {
+        c = DecodeChar(buf_t+4);
         if (c < 256) {
-
-            *outfile = c;
-            outfile++;
-
-            buf_out[r++] = c;
-            r &= (nx - 1);
+            //putc(c, outfile);
+            //printf("Positon: %ld \n", ftell(outfile));
+            *out++ = c;
+            text_buf[r++] = c;
+            r &=(N - 1);
             count++;
         } else {
-            f = DecodePos();
-            i = (r - f - 1) & (nx - 1);
-            j = c - 255 + TRD;
+            i = (r - DecodePosition(buf_t+4)- 1)&(N - 1);
+            j = c - 255 + THRESHOLD;
             for (k = 0; k < j; k++) {
-                c = buf_out[(i + k) & (nx - 1)];
-
-                *outfile = c;
-                outfile++;
-
-                buf_out[r++] = c;
-                r &= (nx - 1);
+                c = text_buf[(i + k)&(N - 1)];
+                //putc(c, outfile);
+                //printf("Positon: %ld \n", ftell(outfile));
+                *out++ = c;
+                text_buf[r++] = c;
+                r &=(N - 1);
                 count++;
             }
         }
-
+        /*if (count > printcount) {
+            printf("%12ld\r", count);
+            printcount += 1024;
+        }*/
     }
-    return tsize;
+    //printf("%12ld\n", count);
 }
+
+
+unsigned int coDecrypteSize(void *in) {
+    unsigned int *data = in;
+    return *data;
+}
+
+

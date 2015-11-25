@@ -10,11 +10,18 @@
 #include <wchar.h>
 #include "ff_ext.h"
 #include <stdlib.h>
-
+#include "mem.h"
+#include <stdio.h>
+#include "misc.h"
+#include "qifacode.h"
 
 
 #define MOTOR_SCALE   1
 #define FILEPATH  L"1:\\"
+#define BTSR_DIS_BUF_SIZE 512*1024
+#define BTSR_DIS_BUF_CNT  6
+
+
 
 
 
@@ -36,6 +43,7 @@ static struct list_head welt_param_freelist;
 static BTSR __btsr_pool[10];
 static struct list_head btsr_freelist;
 static struct list_head btsrlist;
+
 
 static unsigned char cofilebuf[1024 * 2048];
 
@@ -69,7 +77,25 @@ static uint32 get_co_check(void *buf, uint32 dwSize) {
 }
 
 
-void coInit() {
+
+static OS_MEM jacmem,btsr_dis_mem,guidmem;
+
+
+MACHINE machine;
+
+static void L10L12_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum);
+static void L10L12_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                                   uint16 *alarmcode, uint32 *alarmnum);
+static void L10L12_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+
+
+static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum);
+static void L04E7_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                                  uint16 *alarmcode, uint32 *alarmnum);
+static void L04E7_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+
+
+void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum) {
     INIT_LIST_HEAD(&funcfreelist);
     INIT_LIST_HEAD(&fengmenfreelist);
     INIT_LIST_HEAD(&runstepfreelist);
@@ -96,8 +122,35 @@ void coInit() {
     for (int i = 0; i < lenthof(__btsr_pool); i++) {
         list_add_tail(&__btsr_pool[i].list, &btsr_freelist);
     }
-
+    //creat jacq memery pool
+    static SEL_JAC jacpool[1000];
+    static SEL_GUID guidpool[30];
+    static char btsr_dis_buf[BTSR_DIS_BUF_CNT][BTSR_DIS_BUF_SIZE];
+    MEM_ERR memerr;
+    MemCreate(&jacmem, "jacq memery pool", jacpool, lenthof(jacpool), sizeof(SEL_JAC), &memerr);
+    ASSERT(memerr == MEM_ERR_NONE);
+    MemCreate(&guidmem, "guid memery pool", guidpool, lenthof(guidpool), sizeof(SEL_GUID), &memerr);
+    ASSERT(memerr == MEM_ERR_NONE);
+    MemCreate(&btsr_dis_mem, "btsr dis memery", btsr_dis_buf, BTSR_DIS_BUF_CNT, BTSR_DIS_BUF_SIZE, &memerr);
+    ASSERT(memerr == MEM_ERR_NONE);
+    ASSERT(niddleNum % 16 == 0);
+    machine.niddleNum = niddleNum;
+    machine.feedNum = 4;
+    machine.selPreNiddleNum = sel_PreNiddleNum;
+    strcpy(machine.name, machinename);
+    if (strcmp(machinename, "L510") == 0) {
+        machine.fun0203Resolve = L10L12_fun0203Resolve;
+        machine.fun031eToValvecode = L10L12_031eToValvecode;
+        machine.funcode2Alarm = L10L12_funcode2Alarm;
+    } else if (strcmp(machinename, "L04E7") == 0) {
+        machine.fun0203Resolve = L04E7_fun0203Resolve;
+        machine.fun031eToValvecode = L04E7_031eToValvecode;
+        machine.funcode2Alarm = L04E7_funcode2Alarm;
+    } else {
+        while (1);
+    }
 }
+
 
 
 static void readSinkMotor(void *sinkmotorbuf, SINKERMOTOR_ZONE *zone, unsigned int *num) {
@@ -302,13 +355,20 @@ static void readEconomizer(uint8 *econobuf, ECONOMIZER_PARAM *econo, uint32 *num
     }
 }
 
-static void co_read_reset(S_CO *co, uint8 resetpartbuf[]) {
+
+#define MACHINE_NIDDLE_NUM_NOT_MATCH   -1
+
+static int32 co_read_reset(S_CO *co, uint8 resetpartbuf[], bool checkNiddleNum) {
     CO_RESET_INFO *info = (CO_RESET_INFO *)resetpartbuf;
 
     memcpy(&co->resetinfo, info, sizeof*info);
 
     co->diameter = info->diameter;
+    if (checkNiddleNum && info->niddle != machine.niddleNum) {
+        return MACHINE_NIDDLE_NUM_NOT_MATCH;
+    }
     co->niddle = info->niddle;
+
 
     //read sizemoter;
     readSizemotor(resetpartbuf + info->sizemotorAddr, co->sizemotor,
@@ -319,13 +379,17 @@ static void co_read_reset(S_CO *co, uint8 resetpartbuf[]) {
                   co->sinkmoterzone_1_3, &co->numofsinkmoterzone_1_3);
 
     //read sinkermotor_feed2_4;
-    readSinkMotor(resetpartbuf + info->sinkermotor_feed2_4_Addr,
-                  co->sinkmoterzone_2_4, &co->numofsinkmoterzone_2_4);
+    if (info->sinkermotor_feed2_4_Addr != 0) {
+        readSinkMotor(resetpartbuf + info->sinkermotor_feed2_4_Addr,
+                      co->sinkmoterzone_2_4, &co->numofsinkmoterzone_2_4);
+    }
 
     //read sinkerangular;
-    readSinkMotor(resetpartbuf + info->sinkerangular_Addr,
-                  co->sinkangular, &co->numofsinkangular);
-
+    if (info->sinkerangular_Addr != 0) {
+        readSinkMotor(resetpartbuf + info->sinkerangular_Addr,
+                      co->sinkangular, &co->numofsinkangular);
+    }
+    return 0;
 }
 
 
@@ -392,6 +456,38 @@ static void co_read_supe(S_CO *co, uint8 supepartbuf[]) {
 }
 
 
+
+
+static unsigned int co_read_jacq(S_CO *co, uint8 jacpcrypteddata[], unsigned int size) {
+    unsigned int desize = coDecrypteSize(jacpcrypteddata);
+    unsigned char *p = malloc(desize);
+    ASSERT(p != NULL);
+    coDecrypt(jacpcrypteddata, size, p);
+    co->jacsize = desize;
+    co->jac = p;
+    return desize;
+}
+
+
+static unsigned int co_read_dis(S_CO *co, uint8 discrypteddata[], unsigned int size) {
+    unsigned int desize = coDecrypteSize(discrypteddata);
+    unsigned char *p = malloc(desize);
+    ASSERT(p != NULL);
+    coDecrypt(discrypteddata, size, p);
+    co->dissize = desize;
+    co->dis = p;
+    return desize;
+}
+
+static unsigned int co_read_guid(S_CO *co, uint8 guidcrypted[], unsigned int size) {
+    unsigned int desize = coDecrypteSize(guidcrypted);
+    unsigned char *p = malloc(desize);
+    ASSERT(p != NULL);
+    coDecrypt(guidcrypted, size, p);
+    co->guidsize = desize;
+    co->guid = p;
+    return desize;
+}
 
 
 uint32 co_get_crc(void *dat, uint16 dwSize) {
@@ -465,7 +561,7 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 }
 
 
-int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
+int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
     FIL file;
     unsigned int br;
     int32 re = CO_FILE_READ_OK;
@@ -484,6 +580,9 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     INIT_LIST_HEAD(&co->speed);
     INIT_LIST_HEAD(&co->welt);
 
+    char temp1[20], temp2[20];
+    unsigned int dissize, jacqsize, guidsize;
+
     //open co file
     FRESULT r = f_open(&file, path, FA_READ);
     if (r != FR_OK) {
@@ -497,6 +596,12 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     r = f_read(&file, &co->head, sizeof(CO_HEADER), &br);
     if (r != FR_OK || br != sizeof(CO_HEADER)) {
         re = CO_FILE_READ_ERROR;
+        goto ERROR;
+    }
+    strtrim(temp1, co->head.machineName);
+    strtrim(temp2, machine.name);
+    if (strcmp(temp1, temp2) != 0) {
+        re = CO_MACHINE_NOT_MATCH;
         goto ERROR;
     }
     //unsigned char ver = buf[28];
@@ -516,7 +621,10 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-    co_read_reset(co, cofilebuf);
+    if (co_read_reset(co, cofilebuf, (flag & 0x01)) == MACHINE_NIDDLE_NUM_NOT_MATCH) {
+        re = CO_NIDDLE_NOT_MATCH;
+        goto ERROR;
+    }
 
     //READ CO YARN SECTION(section 1)
     f_lseek(&file, co->head.sec[1].offset << 8);
@@ -562,6 +670,50 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
+    //READ CO JACQ SECTION(section 4)
+    f_lseek(&file, co->head.sec[4].offset << 8);
+    jacqsize = co->head.sec[4].len << 8;
+    r = f_read(&file, &cofilebuf, jacqsize, &br);
+    if (r != FR_OK || br != jacqsize) {
+        re = CO_FILE_READ_ERROR;
+        goto ERROR;
+    }
+    if (co->head.sec[4].check != get_co_check(cofilebuf, jacqsize)) {
+        re = CO_FILE_CHECK_ERROR;
+        goto ERROR;
+    }
+    co_read_jacq(co, cofilebuf, jacqsize);
+
+    //read co GUID section
+
+    f_lseek(&file, co->head.sec[5].offset << 8);
+    guidsize = co->head.sec[5].len << 8;
+    r = f_read(&file, &cofilebuf, guidsize, &br);
+    if (r != FR_OK || br != guidsize) {
+        re = CO_FILE_READ_ERROR;
+        goto ERROR;
+    }
+    if (co->head.sec[5].check != get_co_check(cofilebuf, guidsize)) {
+        re = CO_FILE_CHECK_ERROR;
+        goto ERROR;
+    }
+    co_read_guid(co, cofilebuf, guidsize);
+
+
+    //READ CO DIS SECTION(section 6)
+    f_lseek(&file, co->head.sec[6].offset << 8);
+    dissize = co->head.sec[6].len << 8;
+    r = f_read(&file, &cofilebuf, dissize, &br);
+    if (r != FR_OK || br != dissize) {
+        re = CO_FILE_READ_ERROR;
+        goto ERROR;
+    }
+    if (co->head.sec[6].check != get_co_check(cofilebuf, dissize)) {
+        re = CO_FILE_CHECK_ERROR;
+        goto ERROR;
+    }
+    co_read_dis(co, cofilebuf, dissize);
+
 
     //READ CO SUPE SECTION(section 7)
     f_lseek(&file, co->head.sec[7].offset << 8);
@@ -576,7 +728,9 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
     }
     co_read_supe(co, cofilebuf);
 
+
     f_close(&file);
+    co->machine = &machine;
     co->parsed = true;
     return re;
 
@@ -591,6 +745,24 @@ int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset) {
 
 
 static void freeBtsr(S_CO_RUN *co_run);
+
+
+void stepJacqRelease(S_CO_RUN *co_run) {
+    for (int i = 0; i < co_run->seljacnum; i++) {
+        MEM_ERR err;
+        MemPut(&jacmem, co_run->seljac[i], &err);
+    }
+    co_run->seljacnum = 0;
+}
+
+
+void stepGuidRelease(S_CO_RUN *co_run) {
+    for (int i = 0; i < co_run->selguidnum; i++) {
+        MEM_ERR err;
+        MemPut(&guidmem, co_run->selguid[i], &err);
+    }
+    co_run->selguidnum = 0;
+}
 
 void coRelease(S_CO *co) {
     if (!co->parsed) {
@@ -633,6 +805,25 @@ void coRelease(S_CO *co) {
         list_add(p, &welt_param_freelist);
     }
 
+    //release jacq and dis in co
+    //MEM_ERR memerr;
+    if (co->guid != NULL) {
+        free(co->guid);
+        co->guid = NULL;
+        co->guidsize = 0;
+    }
+
+    if (co->jac != NULL) {
+        free(co->jac);
+        co->jac = NULL;
+        co->jacsize = 0;
+    }
+    if (co->dis != NULL) {
+        free(co->dis);
+        co->dis = NULL;
+        co->dissize = 0;
+    }
+
     //release CO_RUN
     if (co->run != NULL) {
         S_CO_RUN *run = co->run;
@@ -647,6 +838,8 @@ void coRelease(S_CO *co) {
         if (run->btsr != NULL) {
             freeBtsr(run);
         }
+        stepJacqRelease(run);
+        stepGuidRelease(run);
         memset(run, 0, sizeof*run);
     }
     memset(co, 0, sizeof*co);
@@ -838,6 +1031,9 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
         }
         return;
     }
+    for (int j = 0; j < 8; j++) {
+        co_run->stepptr[0]->ilinetag[j] = 0;
+    }
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
         if (co->econo[iecon].end == i) { //tag economizer begin
@@ -854,7 +1050,7 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
             for (int j = 0; j < 8; j++) {
                 co_run->numofline[j] += econodif * (co->econo[iecon].economize[j] - 1) + 1;
                 if (i != 0) { //set ECONO_END step ilinetag
-                    co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j] + 1;
+                              //co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j] + 1;
                 }
                 if (i != co->numofstep - 1) { //set next step ilinetag
                     co_run->stepptr[i + 1]->ilinetag[j] = co_run->stepptr[i]->ilinetag[j]
@@ -867,8 +1063,11 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
             step->econoFlag = 0;
             for (int j = 0; j < 8; j++) {
                 co_run->numofline[j]++;
-                if (i != 0 && !IS_ECONO_END(*co_run->stepptr[i - 1])) {
+                /*if (i != 0 && !IS_ECONO_END(*co_run->stepptr[i - 1])) {
                     co_run->stepptr[i]->ilinetag[j] = co_run->stepptr[i - 1]->ilinetag[j] + 1;
+                }*/
+                if (i != co->numofstep - 1) {
+                    co_run->stepptr[i + 1]->ilinetag[j] = co_run->stepptr[i]->ilinetag[j] + 1;
                 }
             }
         }
@@ -883,13 +1082,13 @@ static void cocreateindex_sinkmotor(S_CO_RUN *co_run, S_CO *co) {
         if (co->sinkmoterzone_1_3[isinkmotorzone].head.beginStep <= i
             && co->sinkmoterzone_1_3[isinkmotorzone].head.endStep >= i) {
             step->sinkmoterzone_1_3 = &co->sinkmoterzone_1_3[isinkmotorzone];
-            step->sinkmoterzone_2_4 = &co->sinkmoterzone_2_4[isinkmotorzone];
+            //step->sinkmoterzone_2_4 = &co->sinkmoterzone_2_4[isinkmotorzone];
             if (co->sinkmoterzone_1_3[isinkmotorzone].head.endStep == i) {
                 isinkmotorzone++;
             }
         } else {
             step->sinkmoterzone_1_3 = NULL;
-            step->sinkmoterzone_2_4 = NULL;
+            // step->sinkmoterzone_2_4 = NULL;
         }
     }
     //calculate acc
@@ -906,7 +1105,7 @@ static void cocreateindex_sinkmotor(S_CO_RUN *co_run, S_CO *co) {
             }
         }
     }
-    for (int i = 0; i < co->numofsinkmoterzone_2_4; i++) {
+    /*for (int i = 0; i < co->numofsinkmoterzone_2_4; i++) {
         SINKERMOTOR_ZONE *zone = &co->sinkmoterzone_2_4[i];
         uint32 beginstep = zone->head.beginStep;
         uint32 endstep = zone->head.endStep;
@@ -918,7 +1117,7 @@ static void cocreateindex_sinkmotor(S_CO_RUN *co_run, S_CO *co) {
                 zone->param[j].acc = 0;
             }
         }
-    }
+    }*/
 }
 
 
@@ -969,15 +1168,97 @@ static void cocreateindex_welt(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
+
+static void cocreateindex_jacq(S_CO_RUN *co_run, S_CO *co) {
+    char *p = co->jac;
+    JACKHEAD *head = (JACKHEAD *)p;
+    p += head->addrBegin;
+    unsigned int offset;
+
+    co_run->seljacnum = 0;
+    //parsed jacq
+    MEM_ERR memerr;
+    S_CO_RUN_STEP *step;
+    for (int istep = 0; istep < co->numofstep; istep++){
+        step = co_run->stepptr[istep];
+        memset(step->jacsnum, 0, sizeof(step->jacsnum));
+    }
+    for (int istep = 0; istep < co->numofstep; istep++) {
+        offset = *((unsigned int *)p + istep);
+        CO_JACPAT *co_jac = (CO_JACPAT *)(offset + head->addrBegin + (int32)co->jac);
+        step = co_run->stepptr[istep];
+        for (; co_jac->isel != 0x80000000; co_jac++) {
+            unsigned int isel = co_jac->isel;
+            SEL_JAC *jac = MemGet(&jacmem, &memerr);
+            ASSERT(memerr == MEM_ERR_NONE && jac != NULL);
+            ASSERT(co_run->seljacnum < lenthof(co_run->seljac));
+            co_run->seljac[co_run->seljacnum++] = jac;
+            jac->disinfo = (DISINFO *)(((DISHEAD *)co->dis)->selInfoAddr
+                                       + co_jac->disinfoAddr
+                                       + (int32)co->dis);
+            jac->co_jac = co_jac;
+            jac->step = istep;
+            for (int i = istep; i <= co_jac->outStep; i++) {
+                step = co_run->stepptr[i];
+                ASSERT(step->jacsnum[isel] < SEL_PRI_NUM);
+                step->jacs[isel][step->jacsnum[isel]++] = jac;
+                step->haveSel |= 0x01;
+            }
+        }
+    }
+}
+
+
+
+
+static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
+    char *p = co->guid;
+    GUIDHEAD *head = (GUIDHEAD *)p;
+    p += head->addrBegin;
+    unsigned int offset;
+
+    co_run->selguidnum = 0;
+    //parsed guid
+    MEM_ERR memerr;
+    for (int istep = 0; istep < co->numofstep; istep++) {
+        offset = *((unsigned int *)p + istep);
+        CO_GUID *co_guid = (CO_GUID *)(offset + head->addrBegin + (int32)co->guid);
+        S_CO_RUN_STEP *step = co_run->stepptr[istep];
+        for (; co_guid->ifeed != 0x80000000; co_guid++) {
+            unsigned int ifeed = co_guid->ifeed;
+            SEL_GUID *guid = MemGet(&guidmem, &memerr);
+            ASSERT(memerr == MEM_ERR_NONE && guid != NULL);
+            co_run->selguid[co_run->selguidnum++] = guid;
+            guid->disaddr += ((DISHEAD *)co->dis)->guidInfoAddr
+                             + co_guid->addr
+                             + (int32)co->dis;
+            guid->co_guid = co_guid;
+            guid->step = istep;
+            for (int i = istep; i <= co_guid->outStep; i++) {
+                step = co_run->stepptr[i];
+                if (ifeed / co->machine->feedNum) { //CAM
+                    ifeed %= 4;
+                    step->cam[ifeed] = guid;
+                    step->haveSel |= 0x02;
+                } else {
+                    step->finger[ifeed] = guid;
+                    step->haveSel |= 0x04;
+                }
+            }
+        }
+    }
+}
+
+
 static void btsrLoadFile(BTSR *btsr, bool *havematchbtsrfile) {
     *havematchbtsrfile = false;
     wchar_t btsrfilepath[200];
     wcscpy(btsrfilepath, FILEPATH);
     wcscat(btsrfilepath, btsr->name);
     fileFixNameReplace(btsrfilepath, L".btr");
-    FIL  btsrfile;
+    FIL btsrfile;
     BTSR btsrtmp;
-    uint32 br,offset, datasize;
+    uint32 br, offset, datasize;
     if (f_open(&btsrfile, btsrfilepath, FA_READ | FA_OPEN_EXISTING) != FR_OK) {
         return;
     }
@@ -1029,7 +1310,7 @@ static BTSR* allocBtsr(S_CO_RUN *co_run, int32 num, int32 point, int cosize) {
         }
     }
     //if not find, get btsr frome btsr_freelist and add to btsrlist
-    btsr = list_first_entry_or_null(&btsr_freelist,BTSR,list);
+    btsr = list_first_entry_or_null(&btsr_freelist, BTSR, list);
     ASSERT(btsr != NULL);
     btsr->ref = 1;
     btsr->coCheck = cocheck;
@@ -1038,8 +1319,10 @@ static BTSR* allocBtsr(S_CO_RUN *co_run, int32 num, int32 point, int cosize) {
     uint32 numofpoint = btsr->point = point;
     btsr->cosize = cosize;
     uint32 numofline = btsr->numofline = co_run->numofline[cosize];
-    btsr->data = (char *)malloc(num * numofpoint * numofline);
-    ASSERT(btsr->data != NULL);
+    uint32 btsrdatasize = num * numofpoint * numofline;
+    MEM_ERR memerr;
+    btsr->data = (char *)MemGet(&btsr_dis_mem, &memerr);
+    ASSERT(btsr->data != NULL && memerr == MEM_ERR_NONE && btsrdatasize <= BTSR_DIS_BUF_SIZE);
     btsr->datapointer = 0;
     ASSERT(wcslen(co->filename) < 50);
     wcscpy(btsr->name, co->filename);
@@ -1056,7 +1339,9 @@ static void freeBtsr(S_CO_RUN *co_run) {
     BTSR *btsr = co_run->btsr;
     if (--btsr->ref == 0) { //only 1 ref,  release btsr
         if (btsr->data) {
-            free(btsr->data);
+            MEM_ERR memerr;
+            MemPut(&btsr_dis_mem, btsr->data, &memerr);
+            ASSERT(memerr == MEM_ERR_NONE);
             btsr->data = NULL;
         }
         list_move(&btsr->list, &btsr_freelist);
@@ -1086,13 +1371,15 @@ void coRunBtsrStudy(S_CO_RUN *co_run, void *buf, int size) {
     ASSERT(sizeofLineData == size);
     ASSERT(co_run->btsr && co_run->btsr->data);
     uint32 offset = co_run->btsr->datapointer;
-    memcpy(co_run->btsr->data + offset, buf, size);
-    btsr->datapointer += size;
     int32 sizeofdata = btsr->numofline * sizeofLineData;
-    if (offset + size >= sizeofdata) {
+    ASSERT(offset + size <= sizeofdata);
+    if (offset + size == sizeofdata) {
         btsr->dataAvailable = true;
     }
+    memcpy(co_run->btsr->data + offset, buf, size);
+    btsr->datapointer += size;
 }
+
 
 
 bool coRunIsBtsrDataAvailable(S_CO_RUN *co_run) {
@@ -1145,7 +1432,7 @@ BOOL coRunBtsrSave(S_CO_RUN *co_run) {
         goto ERROR;
     }
     f_lseek(&btsrfile, 256);
-    sizeofdata = co_run->btsr->numofline * co_run->btsr->point* co_run->btsr->num;
+    sizeofdata = co_run->btsr->numofline * co_run->btsr->point * co_run->btsr->num;
     if (FR_OK != f_write(&btsrfile, co_run->btsr->data, sizeofdata, &wr) || wr != sizeofdata) {
         goto ERROR;
     }
@@ -1175,6 +1462,7 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
         return;
     }
     INIT_LIST_HEAD(&co_run->step);
+
     co_run->btsr = NULL;
     //create index and list
     for (int i = 0; i < co->numofstep; i++) {
@@ -1200,6 +1488,10 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     cocreateindex_func(co_run, co);
     //fengmen
     cocreateindex_fengmen(co_run, co);
+    //dis
+    cocreateindex_jacq(co_run, co);
+    //guid
+    cocreateindex_guid(co_run, co);
 
     co_run->numofstep = co->numofstep;
     co->run = co_run;
@@ -1278,6 +1570,7 @@ static void corunCalcSizemotor(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 siz
     }
 }
 
+
 static void corunCalcSinkermotor1_3(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
     S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
     SINKERMOTOR_ZONE *sinkermotor_zone_1_3 = step->sinkmoterzone_1_3;
@@ -1301,6 +1594,79 @@ static void corunCalcSinkermotor1_3(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint3
             }
         }*/
     }
+}
+
+
+typedef struct {
+    uint32 linenum;
+    uint32 addr;
+}DIS_GUID_ENTRY;
+
+typedef struct {
+    //uint16 niddleNum;
+    uint16 niddle;
+    uint8 act;
+    uint8 state;
+}DIS_GUID_ACT;
+
+
+
+static uint16 fingercamcode[FEED_NUM][10] = {
+    { Gu1_1, Gu2_1, Gu3_1, Gu4_1, Gu5_1, Gu6_1, Gu1v1, Gu3v1, GURF1, GURA1},
+    { Gu1_2, Gu2_2, Gu3_2, Gu4_2, Gu5_2, Gu6_2, Gu1v2, Gu3v2, GURF2, GURA2},
+    { Gu1_3, Gu2_3, Gu3_3, Gu4_3, Gu5_3, Gu6_3, Gu1v3, Gu3v3, GURF3, GURA3},
+    { Gu1_4, Gu2_4, Gu3_4, Gu4_4, Gu5_4, Gu6_4, Gu1v4, Gu3v4, GURF4, GURA4}
+};
+
+
+uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[]) {
+    uint32 codenum = 0;
+    uint32 machineNiddleNum = machine.niddleNum;
+    //niddle += (niddle + machine.selPreNiddleNum) / machineNiddleNum;
+    uint32 line = run_line->iline;
+    S_CO_RUN_STEP *step = co_run->stepptr[run_line->istep];
+    for (int i = 0; i < FEED_NUM; i++) {
+        SEL_GUID *guid = step->finger[i];
+        if (guid == NULL) {
+            continue;
+        }
+        uint32 guidbaseline = co_run->stepptr[guid->step]->ilinetag[cosize];
+        uint32 outstep_p1 = guid->co_guid->outStep + 1;
+        uint32 guidendline;
+        if (outstep_p1 != co_run->numofstep) {
+            guidendline = co_run->stepptr[outstep_p1]->ilinetag[cosize] - 1;
+        } else {
+            guidendline = co_run->numofline[cosize] - 1;
+        }
+        int32 niddlebegin = guid->co_guid->inNiddle;
+        int32 niddleoff = machineNiddleNum * (line - guidbaseline) + niddle - niddlebegin;
+        int32 niddleoffmax = machineNiddleNum * (guidendline - guidbaseline) + guid->co_guid->outNiddle - guid->co_guid->inNiddle;
+        if (niddleoff >= 0 && niddleoff <= niddleoffmax) {
+            DIS_GUID_ENTRY *dis_entry = (DIS_GUID_ENTRY *)guid->disaddr;
+            uint32 guidloopniddle = dis_entry->linenum * machineNiddleNum; //diddle num per jac loop
+            uint32 guidniddleinloop = niddleoff % guidloopniddle;  //niddle in loop
+            uint32 guidline = guidniddleinloop / machineNiddleNum; // guid line
+            uint32 iguid = guidniddleinloop % machineNiddleNum;
+            //uint32 jacrange = jac->disinfo->endNiddle - jac->disinfo->beginNiddle;
+            //if (ijac > jacrange) {
+            //    continue;
+            //}
+            uint32 *feedactaddr =(uint32 *)((uint32)co_run->co->dis
+                                +  dis_entry->addr
+                                + ((DISHEAD *)(co_run->co->dis))->guidInfoAddr);
+
+            DIS_GUID_ACT *act = (DIS_GUID_ACT *)(feedactaddr[guidline]+((DISHEAD *)(co_run->co->dis))->guidDataAddr+(uint32)co_run->co->dis+2);
+
+            for (int j = 0; act[j].niddle != 0xffff; j++) {
+                if (act[j].niddle == iguid) {
+                    valveCode[codenum] = fingercamcode[i][act[j].act];
+                    valveCode[codenum] |= !!act[j].state << 12;
+                    codenum++;
+                }
+            }
+        }
+    }
+    return codenum;
 }
 
 
@@ -1362,13 +1728,16 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *
 
 //calculate sinker motor_2_4
 /////////////////////////////////////////
-///
+//dis-finger dis-cam
+//corunReadDisfingerCam(co_run,line,size);
 //welt;
     line->welt = step->welt;
 
 //funcode
     line->flag = 0;
     funcodeParse(step->func, line->act, line->alarm, &line->flag);
+//guid
+
 
 //fengmen
     if (step->fengmen != NULL && istep != preistep) {
@@ -1384,8 +1753,159 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *
         line->isfengmenAct = false;
     }
 
+    //jacq guid flag
+    line->flag |= step->haveSel<<8;
+
     return co_run->numofline[size] - line->iline - 1;
 }
+
+
+
+uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize) {
+    uint8 seldata = 0, selmask = 0;
+    uint8 slzseldata = 0, slzselmask = 0;
+    uint8 patseldata = 0, patselmask = 0;
+    uint8 patsupand = 0xff, patsupor = 0;
+    ASSERT(niddle < machine.niddleNum);
+    uint32 machineNiddleNum = machine.niddleNum;
+    niddle += (niddle + machine.selPreNiddleNum) / machineNiddleNum;
+    uint32 line = run_line->iline;
+    S_CO_RUN_STEP *step = co_run->stepptr[run_line->istep];
+    if ((niddle + machine.selPreNiddleNum) / machineNiddleNum > 0) { // sel pre compensate
+        line++;
+        if ((step->istep + 1) != co_run->numofstep && line == (step + 1)->ilinetag[cosize]) {
+            step++;
+        }
+    }
+    for (int i = 0; i < FEED_NUM; i++) {
+        for (int j = 0; j < step->jacsnum[i]; j++) {
+            SEL_JAC *jac = step->jacs[i][j];
+            uint32 jacbaseline = co_run->stepptr[jac->step]->ilinetag[cosize];
+            uint32 outstep_p1 = jac->co_jac->outStep + 1;
+            uint32 jacendline;
+            if (outstep_p1 != co_run->numofstep) {
+                jacendline = co_run->stepptr[outstep_p1]->ilinetag[cosize] - 1;
+            } else {
+                jacendline = co_run->numofline[cosize] - 1;
+            }
+            int32 niddlebegin = jac->co_jac->inNiddle;
+            int32 niddleoff = machineNiddleNum * (line - jacbaseline) + niddle - niddlebegin;
+            int32 niddleoffmax = machineNiddleNum * (jacendline - jacbaseline) + jac->co_jac->outNiddle - jac->co_jac->inNiddle;
+            if (niddleoff >= 0 && niddleoff <= niddleoffmax) {
+                uint32 jacloopniddle = jac->disinfo->num * machineNiddleNum; //diddle num per jac loop
+                uint32 jacniddleinloop = niddleoff % jacloopniddle;  //diddle in loop
+                uint32 jacline = jacniddleinloop / machineNiddleNum; // jacq line
+                uint32 ijac = jacniddleinloop % machineNiddleNum;
+                uint32 jacrange = jac->disinfo->endNiddle - jac->disinfo->beginNiddle;
+                if (ijac > jacrange) {
+                    continue;
+                }
+                uint32 ijacdword = ijac / 32;
+                uint32 ijacbitmask = 1 << (31 - ijac % 32);
+                uint32 jackcodataaddr = *(&jac->disinfo->num + jacline + 1) +
+                                        (uint32)co_run->co->dis +
+                                        ((DISHEAD *)(co_run->co->dis))->selDataAddr;
+
+                uint32 jackcodata = ((CO_DIS_DATA *)jackcodataaddr)->data[ijacdword];
+
+                switch (jac->co_jac->selType) {
+                case JACQTYPE_SLZ:
+                    slzseldata |= !!(jackcodata & ijacbitmask) << i;
+                    slzselmask |= (1 << i);
+                    break;
+                case JACQTYPE_PAT:
+                    patseldata |= !!(jackcodata & ijacbitmask) << i;
+                    patselmask |= (1 << i);
+                    break;
+                case JACQTYPE_SUP0:
+                    patsupand &= ~(!!(~jackcodata & ijacbitmask) << i);
+                    break;
+                case JACQTYPE_SUP1:
+                    patsupor |= !!(jackcodata & ijacbitmask) << i;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+    selmask = slzselmask | patselmask;
+    patseldata &= patsupand;
+    patseldata |= patsupor;
+    seldata = (patseldata & ~slzselmask) | (slzseldata & slzselmask);
+    return(selmask | !!selmask << 7) << 8 | seldata;
+}
+
+
+
+#if 0
+uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize) {
+    uint8 seldata = 0,selmask = 0;
+    uint8 slzseldata = 0,slzselmask = 0;
+    uint8 patseldata = 0,patselmask = 0;
+    uint8 patsupand = 0xff , patsupor = 0;
+    for (int i = 0; i < FEED_NUM; i++) {
+        S_CO_RUN_STEP *step = co_run->stepptr[run_line->istep];
+        uint32 line = run_line->iline;
+        for (int j=0;j<step->jacsnum[i];j++) {
+            SEL_JAC *jac = step->jacs[i][j];
+            uint32 jacbaseline = co_run->stepptr[jac->step]->ilinetag[cosize];
+            uint32 outstep_p1 = jac->co_jac->outStep + 1;
+            uint32 jacendline;
+            if (outstep_p1 != co_run->numofstep) {
+                jacendline = co_run->stepptr[outstep_p1]->ilinetag[cosize] - 1;
+            } else {
+                jacendline = co_run->numofline[cosize] - 1;
+            }
+            int32 niddlebegin = jac->co_jac->inNiddle;
+            int32 niddleoff = machineNiddleNum * (line - jacbaseline) + niddle - niddlebegin;
+            int32 niddleoffmax = machineNiddleNum * (jacendline - jacbaseline) + jac->co_jac->outNiddle - jac->co_jac->inNiddle;
+            if (niddleoff >= 0 && niddleoff <= niddleoffmax) {
+                uint32 jacloopniddle = jac->disinfo->num * machineNiddleNum; //diddle num per jac loop
+                uint32 jacniddleinloop = niddleoff % jacloopniddle;  //diddle in loop
+                uint32 jacline = jacniddleinloop / machineNiddleNum; // jacq line
+                uint32 ijac = jacniddleinloop % machineNiddleNum;
+                uint32 jacrange = jac->disinfo->endNiddle - jac->disinfo->beginNiddle;
+                if (ijac > jacrange) {
+                    continue;
+                }
+                uint32 ijacdword = ijac / 32;
+                uint32 ijacbitmask = 1 << (31 - ijac % 32);
+                uint32 jackcodataaddr = *(&jac->disinfo->num + jacline+1) +
+                                        (uint32)co_run->co->dis +
+                                        ((DISHEAD *)(co_run->co->dis))->selDataAddr;
+
+                uint32 jackcodata = ((CO_DIS_DATA *)jackcodataaddr) -> data[ijacdword];
+
+                switch (jac->co_jac->selType) {
+                case JACQTYPE_SLZ:
+                    slzseldata |= !!(jackcodata & ijacbitmask) << i;
+                    slzselmask |= (1 << i);
+                    break;
+                case JACQTYPE_PAT:
+                    patseldata |= !!(jackcodata & ijacbitmask) << i;
+                    patselmask |= (1 << i);
+                    break;
+                case JACQTYPE_SUP0:
+                    //patsupand  &=  !!(jackcodata & ijacbitmask)<<i;
+                    break;
+                case JACQTYPE_SUP1:
+                    //patsupor  |= !!(jackcodata & ijacbitmask)<<i;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+    }
+    selmask = slzselmask | patselmask;
+    //patseldata &= patsupand;
+    //patseldata |= patsupor;
+    seldata = (patseldata & ~slzselmask) | (slzseldata & slzselmask);
+    return(selmask | !!selmask<<7)<<8 | seldata;
+}
+
+#endif
 
 
 void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
@@ -1681,7 +2201,7 @@ static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve, ALARM_GR
 }
 
 
-static uint16 freeselcode2Valvecode(uint16 funcval) {
+static uint16 L10L12_freeselcode2Valvecode(uint16 funcval) {
     uint16 valvecode;
     uint32 line, feed;
     if (funcval >= 0x65 && funcval <= 0xa4) { //free sel line 1 to line8
@@ -1701,7 +2221,7 @@ static uint16 freeselcode2Valvecode(uint16 funcval) {
 
 
 
-static void fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num) {
+static void L10L12_fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num) {
     uint32 feed;
     if (funcval >= 0x1d && funcval <= 0x24) { //1x1i    sel line 16
         feed = (funcval - 0x1d) / 2;
@@ -1751,8 +2271,15 @@ static void fixselcode2Valvecode(uint16 funcval, uint16 *valvecode, uint32 *num)
     }
 }
 
-static uint16 hafuzhencode2Valvecode(uint16 funcval) {
+static uint16 L10L12_hafuzhencode2Valvecode(uint16 funcval) {
     funcval -= 0x0d;
+    uint32 valvecode = !(funcval & 0x01ul) << 12;
+    valvecode |= HAFUZHEN_BASE + (funcval >> 1);
+    return valvecode;
+}
+
+static uint16 L04E7_hafuzhencode2Valvecode(uint16 funcval) {
+    funcval -= 0x02;
     uint32 valvecode = !(funcval & 0x01ul) << 12;
     valvecode |= HAFUZHEN_BASE + (funcval >> 1);
     return valvecode;
@@ -1767,7 +2294,10 @@ static uint16 common0506func2Valvecode(uint16 funcval) {
 
 static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
-        { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}}, { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}}, { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}}, { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
+        { { 0, 293, 113 }, { 0, 293, 113}, { 0, 293, 113}},
+        { { 0, 23, 203}, { 0, 23, 203}, { 0, 23, 203}},
+        { { 0, 113, 293}, { 0, 113, 293}, { 0, 113, 293}},
+        { { 0, 203, 23}, { 0, 203, 23}, { 0, 203, 23}},
     };
 
     bool in = false;
@@ -1776,10 +2306,10 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     uint32 feed = fun->value / 9;
 
     *num = 0;
-    if (caminoutmap[feed][sxt][pos_ace] == 0xffff) {
+    /*if (caminoutmap[feed][sxt][pos_ace] == 0xffff) {
         //TODO guide
         return;
-    }
+    }*/
     if (caminoutmap[feed][sxt][pos_ace] == fun->angular) {
         in = true;
     }
@@ -1818,7 +2348,7 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
 }
 
 
-static uint16 yarnfinger2Valvecode(uint16 funcval) {
+static uint16 L10L12_yarnfinger2Valvecode(uint16 funcval) {
     uint16 valvecode;
     uint32 finger, feed;
     valvecode = !(funcval % 2) << 12; //in:1<<12  out:0<<12
@@ -1828,7 +2358,8 @@ static uint16 yarnfinger2Valvecode(uint16 funcval) {
     return valvecode;
 }
 
-static uint16 misc0203code2Valvecode(uint16 codevalue) {
+
+static uint16 L10L12misc0203code2Valvecode(uint16 codevalue) {
     int16 inorout;
     int16 ivalve;
     int16 re = 0xffff;
@@ -1841,6 +2372,72 @@ static uint16 misc0203code2Valvecode(uint16 codevalue) {
     return re;
 }
 
+static void L10L12_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum) {
+    *valnum = 0;
+    if (codevalue >= 0x48 && codevalue < 0x98) {
+        *valvecode = L10L12_yarnfinger2Valvecode(codevalue);
+        *valnum = 1;
+    } else {
+        *valvecode = L10L12misc0203code2Valvecode(codevalue);
+        if (*valvecode != 0xffff) {
+            *valnum = 1;
+        } else {
+            //TODO GUIDING
+        }
+    }
+}
+
+
+static uint16 L04E7_misc0203code2Valvecode(uint16 codevalue) {
+    static uint16 mis0203funmap[0x90] = {
+        [0] = EV5, [1] = EV17, [2] = EV22, [3] = EV34, [4] = EV35,
+        [5] = EV36, [6] = EV38, [7] = EV39, [8] = EV40, [9] = EV41,
+        [10] = EV42, [11] = EV43, [12] = EV50, [13] = EV51, [14] = EV52,
+        [15] = EV53, [16] = EV54, [17] = EV56, [18] = EV58, [19] = EV59,
+        [20] = EV60, [21] = EV67, [22] = EV68, [23] = EV70, [26] = EV79,
+        [27] = EV80,[28] = EV81, [29] = EV82, [30] = EV89, [31] = EV90,
+        [32] = EV101, [77] = EV86, [78] = EV87, [81] = EV107, [82] = EV108,
+        [83] = EV109, [85] = EV160, [86] = EV161,
+    };
+
+    int16 inorout;
+    int16 ivalve;
+    int16 re = 0xffff;
+    if (codevalue >= 0xa3 && codevalue <= 0xa8) { //EV107 EV108 EV109
+        codevalue--;
+    }
+    ivalve = codevalue >> 1;
+    inorout = !(codevalue % 2) << 12;
+    re = inorout | mis0203funmap[ivalve];
+    return re;
+}
+
+
+static uint16 L04E7_yarnfinger2Valvecode(uint16 funcval) {
+    uint16 valvecode = !(funcval % 2) << 12; //in:1<<12  out:0<<12
+    funcval = (funcval - 0x4a) / 2;
+    static uint16 selcode[40] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+        0x0f, 0x1f, 0x2f, 0x3f, 0x0d, 0x1d, 0x2d, 0x3d, };
+    valvecode |= YARN_FINGER_BASE + selcode[funcval];
+    return valvecode;
+}
+
+
+static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum) {
+    uint16 valvecode_t;
+    if (codevalue >= 0x4a && codevalue <= 0x99) {
+        valvecode_t = L04E7_yarnfinger2Valvecode(codevalue);
+    } else {
+        valvecode_t = L04E7_misc0203code2Valvecode(codevalue);
+    }
+    *valvecode = valvecode_t;
+    *valnum = 1;
+}
+
+
 static uint16 misc0306code2Valvecode(uint16 codevalue) {
     uint16 inorout = !(codevalue % 2) << 12;
     uint16 ivalve = codevalue >> 1;
@@ -1849,7 +2446,7 @@ static uint16 misc0306code2Valvecode(uint16 codevalue) {
 
 
 
-static void funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
+static void L10L12_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
     if (func->funcode == 0x031e) {
         switch (func->value) {
         case 0x01:
@@ -1878,6 +2475,66 @@ static void funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
 }
 
 
+static void L04E7_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
+    if (func->funcode == 0x031e) {
+        switch (func->value) {
+        case 0x01:
+            alarmcode[*alarmnum] = COMMON_FUNCODE_8_CODE;
+            (*alarmnum)++;
+            break;
+        default:
+            break;
+        }
+    } else if (func->funcode == 0x0303) { //fun 12
+        if (func->value == 01) {
+            alarmcode[*alarmnum] = COMMON_FUNCODE_12_2d_CODE;
+            (*alarmnum)++;
+        }
+    }
+}
+
+
+void L10L12_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                            uint16 *alarmcode, uint32 *alarmnum) {
+    if (fun->value < 0x0d) {
+        L10L12_funcode2Alarm(fun, alarmcode, alarmnum);
+        alarmcode += *alarmnum;
+    } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
+        *valvecode = L10L12_hafuzhencode2Valvecode(fun->value);
+        *valnum = 1;
+    } else if ((fun->value >= 0x65 && fun->value <= 0xa4)
+               || (fun->value >= 0xc5 && fun->value <= 0x104)) { //free sel line 1 to line8
+        *valvecode = L10L12_freeselcode2Valvecode(fun->value);
+        *valnum = 1;
+    } else if ((fun->value >= 0x1d && fun->value <= 0x64)
+               || (fun->value >= 0xa5 && fun->value <= 0xc4)) { // fix sel
+        L10L12_fixselcode2Valvecode(fun->value, valvecode, valnum);
+    }
+}
+
+
+void L04E7_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                           uint16 *alarmcode, uint32 *alarmnum) {
+    if (fun->value == 0x01) {
+        L04E7_funcode2Alarm(fun, alarmcode, alarmnum);
+        alarmcode += *alarmnum;
+    } else if (fun->value >= 0x02 && fun->value <= 0x09) { //hafu zhen sanjiao
+        *valvecode = L04E7_hafuzhencode2Valvecode(fun->value);
+        *valnum = 1;
+    }
+}
+
+
+static void fun010fcode2Valvecode(uint16 funcode, uint16 *valvecode, uint32 *valnum) {
+    uint16 valvecode_t = 0;
+    *valnum = 0;
+    if (funcode >= 0x0a && funcode <= 0x0b) {
+        valvecode_t |= (funcode % 2) << 12;
+        valvecode_t |= funcode / 2 + VALVE_1F01_BASE;
+        *valvecode = valvecode_t;
+        *valnum = 1;
+    }
+}
 
 static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                            uint16 *alarmcode, uint32 *alarmnum, uint32 *flag) {
@@ -1886,39 +2543,16 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
     *alarmnum = 0;
     switch (fun->funcode) {
     case 0x031e: //sel
-        if (fun->value < 0x0d) {
-            funcode2Alarm(fun, alarmcode, alarmnum);
-            alarmcode += *alarmnum;
-        } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
-            *valvecode = hafuzhencode2Valvecode(fun->value);
-            *valnum = 1;
-        } else if ((fun->value >= 0x65 && fun->value <= 0xa4)
-                   || (fun->value >= 0xc5 && fun->value <= 0x104)) { //free sel line 1 to line8
-            *valvecode = freeselcode2Valvecode(fun->value);
-            *valnum = 1;
-        } else if ((fun->value >= 0x1d && fun->value <= 0x64)
-                   || (fun->value >= 0xa5 && fun->value <= 0xc4)) { // fix sel
-            fixselcode2Valvecode(fun->value, valvecode, valnum);
-        }
+        //L10l12_031eToValvecode(fun, valvecode, valnum, alarmcode, alarmnum);
+        machine.fun031eToValvecode(fun, valvecode, valnum, alarmcode, alarmnum);
         break;
     case 0x0302: //YARN finger
-        if (fun->value >= 0x48 && fun->value < 0x98) {
-            *valvecode = yarnfinger2Valvecode(fun->value);
-            *valnum = 1;
-        } else {
-            *valvecode = misc0203code2Valvecode(fun->value);
-            if (*valvecode != 0xffff) {
-                *valnum = 1;
-            } else {
-                //TODO GUIDING
-            }
-        }
+        machine.fun0203Resolve(fun->value, valvecode, valnum);
         break;
     case 0x0306:
         *valvecode = misc0306code2Valvecode(fun->value);
         *valnum = 1;
         break;
-
     case 0x0305:  //cam
         camcode2Valvecode(fun, valvecode, valnum);
         if (*valnum != 0) {
@@ -1926,19 +2560,77 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         }
         break;
     case 0x0300:
-        *valvecode = common0506func2Valvecode(fun->value);
+        *valvecode = common0506func2Valvecode(fun->value); //fun05 fun06
         *valnum = 1;
         break;
-    case 0x011e:
+        //case 0x011e:
     case 0x0303:
-        funcode2Alarm(fun, alarmcode, alarmnum);
-        alarmcode += *alarmnum;
+        machine.funcode2Alarm(fun, alarmcode, alarmnum);
+        //alarmcode += *alarmnum;
+        break;
+    case 0x011f:
+        fun010fcode2Valvecode(fun->value, valvecode, valnum);
         break;
     default:
         break;
     }
 }
 
+
+
+
+/************************for co debug **************************/
+#include "qifa.h"
+static FIL acttestfile;
+bool coActTestBegin(const TCHAR *filepath, S_CO_RUN *run) {
+    if (f_open(&acttestfile, filepath, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+        char filename[30], buf[100];
+        wtrToStr(filename, run->co->filename);
+        sprintf(buf, "co filename:%s %d steps %d lines\r\n", filename, run->numofstep, run->numofline[0]);
+        uint32 wr;
+        f_write(&acttestfile, buf, strlen(buf), &wr);
+        return true;
+    }
+    return false;
+}
+
+
+void coActTest(S_CO_RUN_LINE *line) {
+    char buf[200];
+    uint32 wr;
+    const char *inout;
+    if (line->iline != line->co_run->stepptr[line->istep]->ilinetag[0]) {
+        return;
+    }
+    sprintf(buf, "\t step:%3d   line:%3d\r\n\r\n", line->istep, line->iline);
+    f_write(&acttestfile, buf, strlen(buf), &wr);
+    for (int i = 0; i < 360; i++) {
+        if (line->act[i].num == 0 && line->alarm[i].num == 0) continue;
+        sprintf(buf, "\t\t\t angle %3d, act num %d,alarm num %d:", i, line->act[i].num, line->alarm[i].num);
+        f_write(&acttestfile, buf, strlen(buf), &wr);
+        for (int j = 0; j < line->act[i].num; j++) {
+            inout = (line->act[i].valvecode[j] & 1 << 12) ? "in" : "out";
+            uint16 vavle = line->act[i].valvecode[j] & ~((uint16)1 << 12);
+            const char *qifanickname = qifaNickName(vavle);
+            if (qifanickname == NULL) {
+                qifanickname = "NULL";
+            }
+            sprintf(buf, "\t%s %04x %s", qifanickname, vavle, inout);
+            f_write(&acttestfile, buf, strlen(buf), &wr);
+        }
+        for (int j = 0; j < line->alarm[i].num; j++) {
+            sprintf(buf, "\t%04x %s", line->alarm[i].alarmcode[j], "alarm");
+            f_write(&acttestfile, buf, strlen(buf), &wr);
+        }
+        sprintf(buf, "\r\n");
+        f_write(&acttestfile, buf, strlen(buf), &wr);
+    }
+}
+
+
+void coActTestEnd() {
+    f_close(&acttestfile);
+}
 
 
 

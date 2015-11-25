@@ -21,10 +21,14 @@
 #define YARN_LINE_NUMBER  16
 #define VALVE_MIS_BASE    (YARN_FINGER_BASE + FEED_NUMBER*YARN_LINE_NUMBER)
 #define VALVE_MIS_NUMBER  224
-#define VALVE_0603_BASE  (VALVE_MIS_BASE+VALVE_MIS_NUMBER)
+#define VALVE_0603_BASE   (VALVE_MIS_BASE + VALVE_MIS_NUMBER)
+#define VALVE_1F01_BASE   VALVE_0603_BASE+ 32
 
 
 #define COMM_FUNC_BASE    0x2c0
+
+
+
 
 
 
@@ -359,7 +363,104 @@ typedef struct{
 }BTSR;
 
 
+/////////dis///////////////////////////////////
+
+#define DIS_INFO_NUM_MAX          100
+
+
+
+typedef struct{
+    unsigned int diswidth;
+    unsigned int dumy[7];
+    unsigned int selInfoAddr;
+    unsigned int selDataAddr;
+    unsigned int guidInfoAddr;
+    unsigned int guidDataAddr;
+    unsigned char xxx[16];
+}DISHEAD;
+
+
+typedef struct{
+    unsigned int beginNiddle;
+    unsigned int endNiddle;
+    unsigned int distype;
+    unsigned int num;
+}DISINFO;
+
+
+typedef struct {
+    unsigned int filetype;
+    unsigned int dummy[7];
+    unsigned int addrBegin;
+    unsigned int xx[7];
+}JACKHEAD ,GUIDHEAD;
+
+
+typedef struct{
+    unsigned int isel;
+    unsigned int selType;
+    unsigned int dummy[2];
+    unsigned int xxx;
+    unsigned int inNiddle;
+    unsigned int xx[2];
+    unsigned int xxxx;
+    unsigned int outStep;
+    unsigned int outNiddle;
+    unsigned int disinfoAddr;
+}CO_JACPAT;
+
+
+typedef struct{
+    unsigned int width;
+    unsigned int data[1];
+}CO_DIS_DATA;
+
+
+/*typedef struct{
+    CO_JACPAT *co_jac;
+    DISINFO *disinfo;
+}JACPAT;
+
+
+typedef struct {
+    int num;
+    unsigned int bitmap;
+    JACPAT pat[4];
+}STEP_JAC;*/
+
+
+typedef struct {
+    CO_JACPAT *co_jac;
+    uint32 step;
+    DISINFO *disinfo;
+    //struct list_head list;
+}SEL_JAC;
+
+
+
+typedef struct {
+    uint32 ifeed;
+    uint32 xxx[5];
+    uint32 inNiddle;
+    uint32 xxinNiddle;
+    uint32 xx[4];
+    uint32 outStep;
+    uint32 outNiddle;
+    uint32 xxoutNiddle;
+    uint32 addr;
+}CO_GUID;
+
+
+typedef struct {
+    CO_GUID *co_guid;
+    uint32 step;
+    uint32 disaddr;
+    uint32 lineNum;
+}SEL_GUID;
+
+
 typedef struct __S_CO_RUN S_CO_RUN;
+typedef struct __machine_str_tag  MACHINE;
 
 typedef struct {
     wchar filename[100];
@@ -389,9 +490,25 @@ typedef struct {
     uint32 numofeconomizer;
     ECONOMIZER_PARAM econo[200];
     S_CO_RUN *run;
+    MACHINE *machine;
+    //dis
+    unsigned int dissize;
+    void *dis;
+    unsigned int jacsize;
+    void *jac;
+    unsigned int guidsize;
+    void *guid;
     //sink sinkermotor
 }S_CO;
 
+
+#define JACQTYPE_PAT    0x0a
+#define JACQTYPE_SLZ    0x0d
+#define JACQTYPE_SUP1   0x13
+#define JACQTYPE_SUP0   0x12
+#define JACQTYPE_GUSSET0 0x15
+#define JACQTYPE_GUSSET1 0x16
+#define JACQTYPE_GUSSET2 0x17
 
 
 typedef struct {
@@ -408,6 +525,20 @@ typedef struct {
     SIZEMOTOR_ZONE *sizemotor;
     SINKERMOTOR_ZONE *sinkmoterzone_1_3;
     SINKERMOTOR_ZONE *sinkmoterzone_2_4;
+#define FEED_NUM      4
+
+//#define SEL_PRI_PAT      2
+//#define SEL_PRI_SUPPAT   1
+//#define SEL_PRI_SLZ      0
+  #define SEL_PRI_NUM    6
+    uint8 haveSel;
+    uint32 jacsnum[FEED_NUM];
+    SEL_JAC  *jacs[FEED_NUM][SEL_PRI_NUM];
+    //uint32 fingernum[FEED_NUM];
+    SEL_GUID *finger[FEED_NUM];
+    //uint32 camnum[FEED_NUM];
+    SEL_GUID   *cam[FEED_NUM];
+    //struct list_head jacs[FEED_NUM];
     struct list_head *func;
     struct list_head *fengmen;
     struct list_head list;
@@ -436,7 +567,7 @@ typedef struct {
 
 
 
-typedef struct __S_CO_RUN {
+struct __S_CO_RUN {
     //  int32 istep;                   //step conter when run;
     //  uint32 nextline;                //ÏÂÒ»ÐÐ
     //  int32 nextstep;                //nextstep != istep+1, due to economizer
@@ -469,16 +600,24 @@ typedef struct __S_CO_RUN {
     S_CO_RUN_STEP *stepptr[200];      //point to S_CO_RUN_STEP list element
     struct list_head step;          //CO_RUN_STEP list
     BTSR *btsr;
-}S_CO_RUN;
+    //dis
+    uint32 seljacnum;
+    SEL_JAC *seljac[500];
+    uint32 selguidnum;
+    SEL_GUID *selguid[100];
+};
 
 
 
 
 #define LINE_FLAG_ACT 0x02
+#define LINE_FLAG_SEL 0x100
+#define LINE_FLAG_SEL_FINGER 0x400
+#define LINE_FLAG_SEL_CAM   0x200
 
 
-#define COMMON_FUNCODE_4_CODE  0x01
-#define COMMON_FUNCODE_8_CODE  0x02
+#define COMMON_FUNCODE_4_CODE  0x00
+#define COMMON_FUNCODE_8_CODE  0x01
 #define COMMON_FUNCODE_11_CODE    0x10
 #define COMMON_FUNCODE_12_11_CODE 0x11
 #define COMMON_FUNCODE_12_12_CODE 0x12
@@ -549,6 +688,22 @@ __packed typedef struct {
 }
 CN_GROUP;
 
+
+
+struct __machine_str_tag {
+    char name[20];
+    uint32 niddleNum;
+    uint32 feedNum;
+    uint32 selPreNiddleNum;
+    void (*fun0203Resolve)(uint16 codevalue, uint16 *valvecode, uint32 *valnum);
+    void (*fun031eToValvecode)(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                               uint16 *alarmcode, uint32 *alarmnum);
+    void (*funcode2Alarm)(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+};
+
+
+#define CO_MACHINE_NOT_MATCH  -6
+#define CO_NIDDLE_NOT_MATCH   -5
 #define CO_PARSE_PARSED_ERROR  -4
 #define CO_FILE_PARSE_ERROR -3
 #define CO_FILE_READ_ERROR  -1
@@ -569,9 +724,9 @@ CN_GROUP;
 //==============================================================================
 //==============================================================================
 //================================================================================
-extern void coInit();
+extern void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum);
 extern bool coMd5(const TCHAR *path, void *md5, int md5len);
-extern int32 coParse(const TCHAR *path, S_CO *co, unsigned int *offset);
+extern int32 coParse(const TCHAR *path, S_CO *co,uint32 flag, unsigned int *offset);
 extern int32 coSave(S_CO *co, TCHAR *path);
 extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
@@ -582,7 +737,8 @@ extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RU
 //extern bool corunSeekLine(S_CO_RUN *co_run, uint32 line  ,uint32 size);
 extern void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line);
 extern void coRelease(S_CO *co);
-
+extern uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize);
+extern uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[]);
 #define CN_OK  0
 #define CN_READ_ERROR    -1
 #define CN_FILE_ERROR    -2
@@ -594,5 +750,9 @@ extern void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size);
 extern bool coRunBtsrSave(S_CO_RUN *co_run);
 extern bool coRunBtsrData(S_CO_RUN *co_run, int32 iline,void **data,uint32 *datasize);
 extern bool coRunIsBtsrDataAvailable(S_CO_RUN *co_run);
+
+extern bool coActTestBegin(const TCHAR *filepath,S_CO_RUN *co);
+extern void coActTest(S_CO_RUN_LINE *line);
+extern void coActTestEnd();
 
 #endif

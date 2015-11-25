@@ -5,6 +5,7 @@
 #include "can_wp.h"
 #include "pf_can.h"
 #include "qifa.h"
+#include "qifacode.h"
 #include "module.h"
 #include "debug.h"
 #include <string.h>
@@ -12,6 +13,8 @@
 #include "pf_timertick.h"
 #include "mmath.h"
 #include "ff.h"
+#include "mem.h"
+#include "misc.h"
 
 #if QIFA_USE_MAILBOX==1
     #include "pf_mailbox.h"
@@ -94,6 +97,9 @@ void wpQfWrite(unsigned char id, unsigned char *val, unsigned char count) {
 
 bool wpQfReadOhm(unsigned char id, unsigned char qifaId, unsigned short timeout, unsigned short *Ohm) {
     QIFA *qifa = qifaSys.QiFa_Reg_Table[id - 1][qifaId];
+    if (qifa==NULL) {
+        return false;
+    }
     DEFINE_CAN_WP_FRAME(frame);
     frame.funcode = CAN_WP_FUNCODE_QF_READOHM;
     frame.desid = QIFA_ID(id);
@@ -101,7 +107,7 @@ bool wpQfReadOhm(unsigned char id, unsigned char qifaId, unsigned short timeout,
     frame.dlc = 1;
     CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
     atomicClear(&wp_qf_resdata);
-    withintimedo(tmark, timeout) {
+    withintimedo(timeout) {
         if (atomicTestClear(&wp_qf_resdata)) {
             *Ohm = qifa->Ohm;
             return true;
@@ -146,7 +152,7 @@ bool wpQfRead(unsigned char id, unsigned int timeout, unsigned int *status) {
     frame.dlc = 0;
     CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
     atomicClear(&wp_read_qf_flag);
-    withintimedo(tmark, timeout) {
+    withintimedo(timeout) {
         if (atomicTestClear(&wp_read_qf_flag)) {
             *status = Sw_Qf_Status;
             return true;
@@ -192,289 +198,6 @@ void canQfRcv(CAN_WP *frame) {
 }
 
 
-static QIFA __QiFa_Reg[200]
-#if 0
-= {
-    [SL5_1] = { .name = (wchar_t *)L"[SL5-1]Sel5 Fd1", .board_id = 5, .xuhao = 8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL6_1] = { .name = (wchar_t *)L"[SL6-1]Sel6 Fd1", .board_id = 4, .xuhao = 1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL7_1] = { .name = (wchar_t *)L"[SL7-1]Sel7 Fd1", .board_id = 4, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL8_1] = { .name = (wchar_t *)L"[SL8-1]Sel8 Fd1", .board_id = 5, .xuhao = 9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL9_1] = { .name = (wchar_t *)L"[SL9-1]Sel9 Fd1", .board_id = 6, .xuhao = 7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL10_1] = { .name = (wchar_t *)L"[SL10-1]Sel10 Fd1", .board_id = 6, .xuhao = 6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL11_1] = { .name = (wchar_t *)L"[SL11-1]Sel11 Fd1", .board_id = 6, .xuhao = 5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL12_1] = { .name = (wchar_t *)L"[SL12-1]Sel12 Fd1", .board_id = 6, .xuhao = 4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL13_1] = { .name = (wchar_t *)L"[SL13-1]Sel13 Fd1", .board_id = 6, .xuhao = 3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL14_1] = { .name = (wchar_t *)L"[SL14-1]Sel14 Fd1", .board_id = 6, .xuhao = 2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL15_1] = { .name = (wchar_t *)L"[SL15-1]Sel15 Fd1", .board_id = 6, .xuhao = 1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL16_1] = { .name = (wchar_t *)L"[SL16-1]Sel16 Fd1", .board_id = 6, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [SL9_2] = { .name = (wchar_t *)L"[SL9-2]Sel9 Fd2", .board_id = 1, .xuhao = 8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL10_2] = { .name = (wchar_t *)L"[SL10-2]Sel10 Fd2", .board_id = 1, .xuhao = 9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL11_2] = { .name = (wchar_t *)L"[SL11-2]Sel11 Fd2", .board_id = 1, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL12_2] = { .name = (wchar_t *)L"[SL12-2]Sel12 Fd2", .board_id = 1, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL13_2] = { .name = (wchar_t *)L"[SL13-2]Sel13 Fd2", .board_id = 1, .xuhao = 0xc, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL14_2] = { .name = (wchar_t *)L"[SL14-2]Sel14 Fd2", .board_id = 1, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL15_2] = { .name = (wchar_t *)L"[SL15-2]Sel15 Fd2", .board_id = 1, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL16_2] = { .name = (wchar_t *)L"[SL16-2]Sel16 Fd2", .board_id = 1, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [SL5_3] = { .name = (wchar_t *)L"[SL5-3]Sel5 Fd3", .board_id = 2, .xuhao = 7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL6_3] = { .name = (wchar_t *)L"[SL6-3]Sel6 Fd3", .board_id = 3, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL7_3] = { .name = (wchar_t *)L"[SL7-3]Sel7 Fd3", .board_id = 3, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL8_3] = { .name = (wchar_t *)L"[SL8-3]Sel8 Fd3", .board_id = 5, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL9_3] = { .name = (wchar_t *)L"[SL9-3]Sel9 Fd3", .board_id = 1, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL10_3] = { .name = (wchar_t *)L"[SL10-3]Sel10 Fd3", .board_id = 1, .xuhao = 1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL11_3] = { .name = (wchar_t *)L"[SL11-3]Sel11 Fd3", .board_id = 1, .xuhao = 2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL12_3] = { .name = (wchar_t *)L"[SL12-3]Sel12 Fd3", .board_id = 1, .xuhao = 3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL13_3] = { .name = (wchar_t *)L"[SL13-3]Sel13 Fd3", .board_id = 1, .xuhao = 4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL14_3] = { .name = (wchar_t *)L"[SL14-3]Sel14 Fd3", .board_id = 1, .xuhao = 5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL15_3] = { .name = (wchar_t *)L"[SL15-3]Sel15 Fd3", .board_id = 1, .xuhao = 6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL16_3] = { .name = (wchar_t *)L"[SL16-3]Sel16 Fd3", .board_id = 1, .xuhao = 7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [SL9_4] = { .name = (wchar_t *)L"[SL9-4]Sel9 Fd4", .board_id = 6, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL10_4] = { .name = (wchar_t *)L"[SL10-4]Sel10 Fd4", .board_id = 6, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL11_4] = { .name = (wchar_t *)L"[SL11-4]Sel11 Fd4", .board_id = 6, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL12_4] = { .name = (wchar_t *)L"[SL12-4]Sel12 Fd4", .board_id = 6, .xuhao = 0xc, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL13_4] = { .name = (wchar_t *)L"[SL13-4]Sel13 Fd4", .board_id = 6, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL14_4] = { .name = (wchar_t *)L"[SL14-4]Sel14 Fd4", .board_id = 6, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL15_4] = { .name = (wchar_t *)L"[SL15-4]Sel15 Fd4", .board_id = 6, .xuhao = 9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [SL16_4] = { .name = (wchar_t *)L"[SL16-4]Sel16 Fd4", .board_id = 6, .xuhao = 8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV49_Hf2In] = { .name = (wchar_t *)L"[EV49]HfNeedle 2-I", .board_id = 0, .xuhao = 3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV48_Hf1In] = { .name = (wchar_t *)L"[EV48]HfNeedle 1-I", .board_id = 0, .xuhao = 2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV47_Hf2Out] = { .name = (wchar_t *)L"[EV47]HfNeedle 2-O", .board_id = 0, .xuhao = 1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV46_Hf1Out] = { .name = (wchar_t *)L"[EV46]HfNeedle 1-O", .board_id = 0, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Cam1SC] = { .name = (wchar_t *)L"[S1C]C Cam S  Fd1", .board_id = 4, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam1SE] = { .name = (wchar_t *)L"[S1E]E Cam S  Fd1", .board_id = 4, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam1TC] = { .name = (wchar_t *)L"[T1C]C Cam T  Fd1", .board_id = 4, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam1TE] = { .name = (wchar_t *)L"[T1E]E Cam T  Fd1", .board_id = 4, .xuhao = 0xc, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Cam2SC] = { .name = (wchar_t *)L"[S2C]C Cam S  Fd2", .board_id = 3, .xuhao = 0x4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam2SE] = { .name = (wchar_t *)L"[S2E]E Cam S  Fd2", .board_id = 3, .xuhao = 0x5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam2XE] = { .name = (wchar_t *)L"[X2E]E Cam X  Fd2", .board_id = 3, .xuhao = 0x9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam2TC] = { .name = (wchar_t *)L"[T2C]C Cam T  Fd2", .board_id = 3, .xuhao = 0x6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam2TE] = { .name = (wchar_t *)L"[T2E]E Cam T  Fd2", .board_id = 3, .xuhao = 0x7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Cam3SC] = { .name = (wchar_t *)L"[S3C]C Cam S  Fd3", .board_id = 3, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam3SE] = { .name = (wchar_t *)L"[S3E]E Cam S  Fd3", .board_id = 3, .xuhao = 1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam3TC] = { .name = (wchar_t *)L"[T3C]C Cam T  Fd3", .board_id = 3, .xuhao = 2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam3TE] = { .name = (wchar_t *)L"[T3E]E Cam T  Fd3", .board_id = 3, .xuhao = 3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Cam4SC] = { .name = (wchar_t *)L"[S4C]C Cam S  Fd4", .board_id = 4, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam4SE] = { .name = (wchar_t *)L"[S4E]E Cam S  Fd4", .board_id = 4, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam4XE] = { .name = (wchar_t *)L"[X4E]E Cam X  Fd4", .board_id = 4, .xuhao = 0x6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam4TC] = { .name = (wchar_t *)L"[T4C]C Cam T  Fd4", .board_id = 4, .xuhao = 0x9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-    [Cam4TE] = { .name = (wchar_t *)L"[T4E]E Cam T  Fd4", .board_id = 4, .xuhao = 0x8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 1, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Gu1_1] = { .name = (wchar_t *)L"[GU1-1]Gu1 Fd1", .board_id = 5, .xuhao = 0x7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu2_1] = { .name = (wchar_t *)L"[GU2-1]Gu2 Fd1", .board_id = 5, .xuhao = 0x6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3_1] = { .name = (wchar_t *)L"[GU3-1]Gu3 Fd1", .board_id = 5, .xuhao = 0x5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu4_1] = { .name = (wchar_t *)L"[GU4-1]Gu4 Fd1", .board_id = 5, .xuhao = 0x4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu5_1] = { .name = (wchar_t *)L"[GU5-1]Gu5 Fd1", .board_id = 5, .xuhao = 0x3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu6_1] = { .name = (wchar_t *)L"[GU6-1]Gu6 Fd1", .board_id = 5, .xuhao = 0x2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu1v1] = { .name = (wchar_t *)L"[GU1v1]Gu1HF Fd1", .board_id = 5, .xuhao = 0x1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3v1] = { .name = (wchar_t *)L"[GU3V1]Gu3HF Fd1", .board_id = 5, .xuhao = 0x0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Gu1_2] = { .name = (wchar_t *)L"[GU1-2]Gu1 Fd2", .board_id = 2, .xuhao = 0x8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu2_2] = { .name = (wchar_t *)L"[GU2-2]Gu2 Fd2", .board_id = 2, .xuhao = 0x9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3_2] = { .name = (wchar_t *)L"[GU3-2]Gu3 Fd2", .board_id = 2, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu4_2] = { .name = (wchar_t *)L"[GU4-2]Gu4 Fd2", .board_id = 2, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu5_2] = { .name = (wchar_t *)L"[GU5-2]Gu5 Fd2", .board_id = 2, .xuhao = 0xc, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu6_2] = { .name = (wchar_t *)L"[GU6-2]Gu6 Fd2", .board_id = 2, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu1v2] = { .name = (wchar_t *)L"[GU1v2]Gu1HF Fd2", .board_id = 2, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3v2] = { .name = (wchar_t *)L"[GU3V2]Gu3HF Fd2", .board_id = 2, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Gu1_3] = { .name = (wchar_t *)L"[GU1-3]Gu1 Fd3", .board_id = 0, .xuhao = 0x8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu2_3] = { .name = (wchar_t *)L"[GU2-3]Gu2 Fd3", .board_id = 0, .xuhao = 0x9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3_3] = { .name = (wchar_t *)L"[GU3-3]Gu3 Fd3", .board_id = 0, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu4_3] = { .name = (wchar_t *)L"[GU4-3]Gu4 Fd3", .board_id = 0, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu5_3] = { .name = (wchar_t *)L"[GU5-3]Gu5 Fd3", .board_id = 0, .xuhao = 0xc, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu6_3] = { .name = (wchar_t *)L"[GU6-3]Gu6 Fd3", .board_id = 0, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu1v3] = { .name = (wchar_t *)L"[GU1v3]Gu1HF Fd3", .board_id = 0, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3v3] = { .name = (wchar_t *)L"[GU3V3]Gu3HF Fd3", .board_id = 0, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [Gu1_4] = { .name = (wchar_t *)L"[GU1-4]Gu1 Fd4", .board_id = 7, .xuhao = 0x7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu2_4] = { .name = (wchar_t *)L"[GU2-4]Gu2 Fd4", .board_id = 7, .xuhao = 0x6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3_4] = { .name = (wchar_t *)L"[GU3-4]Gu3 Fd4", .board_id = 7, .xuhao = 0x5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu4_4] = { .name = (wchar_t *)L"[GU4-4]Gu4 Fd4", .board_id = 7, .xuhao = 0x4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu5_4] = { .name = (wchar_t *)L"[GU5-4]Gu5 Fd4", .board_id = 7, .xuhao = 0x3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu6_4] = { .name = (wchar_t *)L"[GU6-4]Gu6 Fd4", .board_id = 7, .xuhao = 0x2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu1v4] = { .name = (wchar_t *)L"[GU1v4]Gu1HF Fd4", .board_id = 7, .xuhao = 0x1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [Gu3v4] = { .name = (wchar_t *)L"[GU3V4]Gu3HF Fd4", .board_id = 7, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV5] = { .name = (wchar_t *)L"[EV5]DropCam Fd1", .board_id = 4, .xuhao = 2, .inout = 0, .nc_no = 1,
-        .default_nc_no = 1, .nc_no_changeable = 1, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-    [EV17] = { .name = (wchar_t *)L"[EV17]DropCam Fd2", .board_id = 3, .xuhao = 0xd, .inout = 0, .nc_no = 1,
-        .default_nc_no = 1, .nc_no_changeable = 1, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-    [EV22] = { .name = (wchar_t *)L"[EV22]DropCam Fd3", .board_id = 3, .xuhao = 0xc, .inout = 0, .nc_no = 1,
-        .default_nc_no = 1, .nc_no_changeable = 1, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-    [EV34] = { .name = (wchar_t *)L"[EV34]DropCam Fd4", .board_id = 4, .xuhao = 0x3, .inout = 0, .nc_no = 1,
-        .default_nc_no = 1, .nc_no_changeable = 1, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-    [EV35] = { .name = (wchar_t *)L"[EV35]DropHalf-P", .board_id = 7, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV36] = { .name = (wchar_t *)L"[EV36]BlowCutters", .board_id = 0, .xuhao = 0x7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV38] = { .name = (wchar_t *)L"[EV38]Broken-NProbe", .board_id = 5, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-    [EV39] = { .name = (wchar_t *)L"[EV39]DepressCam Fd1", .board_id = 4, .xuhao = 0x4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV40] = { .name = (wchar_t *)L"[EV40]DepressCam Fd2", .board_id = 3, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV41] = { .name = (wchar_t *)L"[EV41]DepressCam Fd3", .board_id = 3, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV42] = { .name = (wchar_t *)L"[EV42]DepressCam Fd4", .board_id = 4, .xuhao = 0x5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV43] = { .name = (wchar_t *)L"[EV43]NeedleBlow", .board_id = 2, .xuhao = 0x6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV50] = { .name = (wchar_t *)L"[EV50]Hp-Clamp Fd1", .board_id = 7, .xuhao = 0xf, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV51] = { .name = (wchar_t *)L"[EV51]Hp-Clamp Fd3", .board_id = 0, .xuhao = 0x4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV52] = { .name = (wchar_t *)L"[EV52]Lift-Scis Fd1", .board_id = 7, .xuhao = 0xe, .inout = 0, .nc_no = 1,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV54] = { .name = (wchar_t *)L"[EV54]Air Blow Pikot", .board_id = 4, .xuhao = 0x7, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV56] = { .name = (wchar_t *)L"[EV56]Blow-Ref-Y", .board_id = 3, .xuhao = 0x8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV58] = { .name = (wchar_t *)L"[EV58]Machine Needle Opener", .board_id = 2, .xuhao = 0x4, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV59] = { .name = (wchar_t *)L"[EV59]Stop Latches 1", .board_id = 5, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 1, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-    [EV60] = { .name = (wchar_t *)L"[EV60]Stop Latches 3", .board_id = 2, .xuhao = 0x5, .inout = 0, .nc_no = 0,
-        .default_nc_no = 1, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-    [EV67] = { .name = (wchar_t *)L"[EV67]Clasp Tweezer2", .board_id = 7, .xuhao = 0xd, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-    [EV68] = { .name = (wchar_t *)L"[EV68]Clasp Tweezer4", .board_id = 7, .xuhao = 0xc, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-
-    [EV86] = { .name = (wchar_t *)L"[EV86]Exclusion Knife2", .board_id = 7, .xuhao = 0x9, .inout = 0, .nc_no = 0,
-        .default_nc_no = 1, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-    [EV87] = { .name = (wchar_t *)L"[EV87]Exclusion Knife4", .board_id = 0, .xuhao = 0x6, .inout = 0, .nc_no = 0,
-        .default_nc_no = 1, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV70] = { .name = (wchar_t *)L"[EV70]Exclusion Knife3", .board_id = 0, .xuhao = 0x5, .inout = 0, .nc_no = 1,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV85] = { .name = (wchar_t *)L"[EV85]Clasp Tweezer5", .board_id = 2, .xuhao = 0, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV107] = { .name = (wchar_t *)L"[EV107]Clasp Tweezer6[[EV88]", .board_id = 2, .xuhao = 1, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV160] = { .name = (wchar_t *)L"[EV160]movabledropwire Fd1", .board_id = 2, .xuhao = 2, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-    [EV161] = { .name = (wchar_t *)L"[EV161]movabledropwire Fd3", .board_id = 2, .xuhao = 3, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, .nc_no_en = 1, },
-//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-    [EV5F] = { .name = (wchar_t *)L"[EV5F]SockBlow", .board_id = 5, .xuhao = 0xb, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EV6F] = { .name = (wchar_t *)L"[EV6F]KnifeBlow", .board_id = 7, .xuhao = 0x8, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-    [EVMAN] = { .name = (wchar_t *)L"[EVMAN]Handle-L", .board_id = 5, .xuhao = 0xC, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, .nc_no_en = 1, },
-    [EV45] = { .name = (wchar_t *)L"[EV45]Plasmeca Break", .board_id = 5, .xuhao = 0xe, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 1, .cam_en = 0, },
-    [EV84] = { .name = (wchar_t *)L"[EV84]Stop Saw Blade", .board_id = 7, .xuhao = 0xa, .inout = 0, .nc_no = 0,
-        .default_nc_no = 0, .nc_no_changeable = 0, .reset_f0_inout = 0, .cam_en = 0, },
-}
-#endif
-;
-
-
 
 static RINGBUF qifaringbuf;
 static QIFA_VAL qifavalbuf[400];
@@ -512,7 +235,7 @@ typedef struct {
     unsigned short flag;
     unsigned char board_id;
     unsigned char xuhao;
-    unsigned int qifa_hao;
+    unsigned int qfId;
     unsigned int default_nc_no : 1;
     unsigned int nc_no_changeable : 1;
     unsigned int nc_no_dis : 1;
@@ -522,20 +245,45 @@ typedef struct {
 
 
 
-#define QIFA_CFG_FILE  L"1:\\sw.qf"
+
 
 #define QIFA_FLAG    0xaa55
 
-static wchar __qifaname[20000];
 
-static bool __qifainit(QIFA_SYS *qifasys) {
-    QIFA *qifa = qifasys->QiFa_Reg = __QiFa_Reg;
+static OS_MEM qifamem;
+
+static bool __qifainit(QIFA_SYS *qifasys,TCHAR *path) {
+    static wchar __qifaname[20000];
+    static QIFA __QiFa_Reg[160];
+    for (int i=0;i<lenthof(__QiFa_Reg);i++) {
+        __QiFa_Reg[i].flag = 0;
+    }
+    MEM_ERR mem_err;
+    if (!(qifasys->flag & 0x01)) {
+        MemCreate(&qifamem, "qifa mem pool", __QiFa_Reg,
+                   lenthof(__QiFa_Reg),sizeof(QIFA),&mem_err);
+        ASSERT(mem_err==MEM_ERR_NONE);
+        qifasys->flag |= 0x01;
+    }else{
+        for (int i=0;i<lenthof(qifasys->QiFa_Reg);i++) {
+            if (qifasys->QiFa_Reg[i]!=NULL) {
+                uint32 iboard = qifasys->QiFa_Reg[i]->board_id;
+                uint32 iqf = qifasys->QiFa_Reg[i]->xuhao;
+                qifasys->QiFa_Reg_Table[iboard][iqf] = NULL;
+                memset(qifasys->QiFa_Reg[i],0,sizeof(QIFA));
+                MemPut(&qifamem,qifasys->QiFa_Reg[i],&mem_err);
+                ASSERT(mem_err==MEM_ERR_NONE);
+                qifasys->QiFa_Reg[i] = NULL;
+            }
+        }
+    }
+
     FIL file;
     uint32 rb;
     //int nameoffset;
     QF_HEAD head;
     QF_PACKED qifapack;
-    if (f_open(&file, QIFA_CFG_FILE, FA_READ) != FR_OK) {
+    if (f_open(&file, path, FA_READ) != FR_OK) {
         return false;
     }
     f_lseek(&file, 0x80);
@@ -564,20 +312,32 @@ static bool __qifainit(QIFA_SYS *qifasys) {
         if (qifapack.flag != QIFA_FLAG) {
             goto ERROR;
         }
-        qifa[i].board_id = qifapack.board_id;
-        qifa[i].xuhao = qifapack.xuhao;
-        qifa[i].nc_no = qifa[i].default_nc_no = qifapack.default_nc_no;
-        qifa[i].nc_no_changeable = qifapack.nc_no_changeable;
-        qifa[i].nc_no_display = qifapack.nc_no_dis;
-        qifa[i].cam_en = qifapack.iscam;
-        qifa[i].flag = QIFA_FLAG;
+        QIFA *qifa = MemGet(&qifamem,&mem_err);
+        ASSERT(mem_err==MEM_ERR_NONE);
+        uint16 qfid = qifapack.qfId;
+        qifa->board_id = qifapack.board_id;
+        qifa->xuhao = qifapack.xuhao;
+        qifa->nc_no = qifapack.default_nc_no;
+        qifa->default_nc_no = qifapack.default_nc_no;
+        qifa->nc_no_changeable = qifapack.nc_no_changeable;
+        qifa->nc_no_display = qifapack.nc_no_dis;
+        qifa->cam_en = qifapack.iscam;
+        qifa->flag = QIFA_FLAG;
+        qifa->qfid = qfid;
         for (int j=0;j<13;j++) {
             if (qifapack.qifa_name_offset[j]!=-1UL) {
-                qifa[i].name[j] = &__qifaname[qifapack.qifa_name_offset[j] / 2];
+                qifa->name[j] = &__qifaname[qifapack.qifa_name_offset[j] / 2];
             }else{
-                qifa[i].name[j] = &__qifaname[qifapack.qifa_name_offset[0] / 2];
+                qifa->name[j] = &__qifaname[qifapack.qifa_name_offset[0] / 2];
             }
         }
+        char nicknamebuf[100];
+        wtrToStr(nicknamebuf,qifa->name[0]);
+        strtok(nicknamebuf,"[");
+        char *p =  strtok(nicknamebuf,"]");
+        strcpy(qifa->nickname,p+1);
+
+        qifasys->QiFa_Reg[qfid] = qifa;
     }
     f_close(&file);
     return true;
@@ -588,25 +348,22 @@ static bool __qifainit(QIFA_SYS *qifasys) {
 
 
 
-bool qifaInit() {
-    if (__qifainit(&qifaSys) == false) {
+bool qifaInit(TCHAR *path) {
+    if (__qifainit(&qifaSys,path) == false) {
         return false;
     }
-    for (uint32 i = 0; i < qifaSys.numofqifa; i++) {
+    memset(qifaSys.QiFa_Reg_Table,0, sizeof qifaSys.QiFa_Reg_Table);
+    for (uint32 i = 0; i < lenthof(qifaSys.QiFa_Reg); i++) {
 
-        ///////////////////////////////////////
-        qifaSys.QiFa_Reg[i].flag = QIFA_FLAG;
-        //////////////////////////////////////
-
-        if (qifaSys.QiFa_Reg[i].flag != QIFA_FLAG) {
+        if (qifaSys.QiFa_Reg[i] == NULL || qifaSys.QiFa_Reg[i]->flag != QIFA_FLAG ) {
             continue;
         }
-        uint32 board = qifaSys.QiFa_Reg[i].board_id;
-        uint32 iqifa = qifaSys.QiFa_Reg[i].xuhao;
+        uint32 board = qifaSys.QiFa_Reg[i]->board_id;
+        uint32 iqifa = qifaSys.QiFa_Reg[i]->xuhao;
         if (board >= qifaSys.numofboard || iqifa >= qifaSys.numperboard) {
             return false;
         }
-        qifaSys.QiFa_Reg_Table[qifaSys.QiFa_Reg[i].board_id][qifaSys.QiFa_Reg[i].xuhao] = &qifaSys.QiFa_Reg[i];
+        qifaSys.QiFa_Reg_Table[board][iqifa] = qifaSys.QiFa_Reg[i];
     }
 
     ringBufInit(&qifaringbuf, qifavalbuf, sizeof(QIFA_VAL), lenthof(qifavalbuf), 1);
@@ -622,14 +379,28 @@ bool qifaInit() {
 }
 
 
-wchar * qifaName(QIFA *qifa ,uint32 nameindex) {
+const wchar * qifaName(QIFA *qifa ,uint32 nameindex) {
+    if (qifa == NULL || qifa->flag!=QIFA_FLAG) {
+        return NULL;
+    }
     if(nameindex>12) nameindex = 0;
     return qifa->name[nameindex];
 }
 
 
+const char *qifaNickName(uint16 valecode){
+    QIFA *qifa = qifaSys.QiFa_Reg[valecode];
+    if (qifa && qifa->flag==QIFA_FLAG) {
+        return qifa->nickname;
+    }
+    return NULL;
+}
+
+
 void qifaSet(QIFA *qifa, uint32 val){
-    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
+    if (qifa == NULL || qifa->flag!=QIFA_FLAG) {
+        return;
+    }
     QIFA_VAL qifa_val;
     qifa_val.qifa = qifa;
     qifa_val.val = !!val;
@@ -638,6 +409,14 @@ void qifaSet(QIFA *qifa, uint32 val){
     uint32 mbaddr = modulelist[MODULE_ID_MB].baseAddr;
     MBsendMessage(mbaddr, 0, 0x55555555);
 #endif
+}
+
+void qifaFunSet(uint16 funcode,uint32 val){
+    if (funcode==NUd) {
+        return;
+    }
+    QIFA *qifa = qifaSys.QiFa_Reg[funcode];
+    qifaSet(qifa, val);
 }
 
 
@@ -651,6 +430,9 @@ void qifaSet1(uint32 wpId, uint32 iqifa, uint32 val) {
 void qifaSetIo(uint32 wpId, uint32 iqifa, uint32 val) {
     ASSERT(wpId > 0 && wpId <= qifaSys.numofboard);
     QIFA *qifa = qifaSys.QiFa_Reg_Table[wpId - 1][iqifa];
+    if (qifa==NULL) {
+        return;
+    }
     qifaSet(qifa, !!val ^ qifa->nc_no);
 }
 
@@ -684,6 +466,9 @@ int32 qifaReadIo(QIFA * qifa, bool comm) {
 int32 qifaReadIo1(uint32 wpId, uint32 iqifa, bool comm) {
     ASSERT(wpId > 0 && wpId <= qifaSys.numofboard);
     QIFA *qifa = qifaSys.QiFa_Reg_Table[wpId - 1][iqifa];
+    if (qifa==NULL) {
+        return 0;
+    }
     return qifaReadIo(qifa, comm);
 }
 
@@ -708,7 +493,9 @@ uint32 qifaReadIo2(uint32 wpId, bool comm) {
 
 
 uint32 qifaBak(QIFA * qifa) {
-    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
+    if (qifa == NULL || qifa->flag!=QIFA_FLAG) {
+        return -1UL;
+    }
     return qifa->inout_bak = qifa->inout;
 }
 
@@ -722,7 +509,9 @@ uint32 qifaBak2(uint32 wpId) {
 
 
 void qifaRestore(QIFA * qifa) {
-    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
+    if (qifa == NULL || qifa->flag!=QIFA_FLAG) {
+        return;
+    }
     qifaSet(qifa, qifa->inout_bak);
 }
 

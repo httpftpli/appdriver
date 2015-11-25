@@ -1,9 +1,9 @@
-#include <stdio.h>
-#include <stdlib.h>
+//#include <stdio.h>
+//#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
+//#include <ctype.h>
 #include "MyDll.h"
-#include "stdafx.h"
+//#include "stdafx.h"
 
 
 
@@ -15,7 +15,7 @@ typedef unsigned char INT8U;                    /* Unsigned  8 bit quantity     
 typedef signed char INT8S;                    /* Signed    8 bit quantity                           */
 typedef unsigned short INT16U;                 /* Unsigned 16 bit quantity                           */
 typedef signed short INT16S;                 /* Signed   16 bit quantity                           */
-typedef unsigned long INT32U;                   /* Unsigned 32 bit quantity                           */
+typedef unsigned int INT32U;                   /* Unsigned 32 bit quantity                           */
 typedef signed long INT32S;                   /* Signed   32 bit quantity                           */
 typedef float FP32;                     /* Single precision floating point                    */
 typedef double FP64;                     /* Double precision floating point                    */
@@ -32,13 +32,9 @@ typedef unsigned int OS_CPU_SR;                /* Define size of CPU status regi
 ///////////////////////
 
 
-FILE *infile, *outfile;
+//FILE *infile, *outfile;
 INT32U textsize = 0, codesize = 0, printcount = 0;
 
-void Error(char *message) {
-    printf("\n%s\n", message);
-    exit(EXIT_FAILED);
-}
 
 /* LZSS Parameters */
 
@@ -146,9 +142,9 @@ void DeleteNode(INT16S p) {  /* Deleting node from the tree */
 
 typedef INT8U uchar;
 
-/*  
- * Tables for encoding/decoding upper 6 bits of  
- * sliding dictionary pointer  
+/*
+ * Tables for encoding/decoding upper 6 bits of
+ * sliding dictionary pointer
  */
 /* encoder table */
 uchar p_len[64] = {
@@ -246,9 +242,9 @@ uchar d_len[256] = {
 
 INT16U freq[T + 1]; /* cumulative freq table */
 
-/*  
- * pointing parent nodes.  
- * area [T..(T + N_CHAR - 1)] are pointers for leaves  
+/*
+ * pointing parent nodes.
+ * area [T..(T + N_CHAR - 1)] are pointers for leaves
  */
 INT16S prnt[T + N_CHAR];
 
@@ -258,12 +254,16 @@ INT16S son[T];
 INT16U getbuf = 0;
 INT8U getlen = 0;
 
-INT16S GetBit(void) { /* get one bit */
-    INT16S i;
 
+static INT32U p = 0;
+
+INT16S GetBit(void *buf) { /* get one bit */
+    INT16S i;
+    char *buf_t = (char *)buf;
     while (getlen <= 8) {
-        if ((i = getc(infile)) < 0) i = 0;
-        printf(" Infile Positon: %ld \n", ftell(infile));
+        i = buf_t[p++];
+        if (i < 0) i = 0;
+        //printf(" Infile Positon: %ld \n", ftell(infile));
         getbuf |= i << (8 - getlen);
         getlen += 8;
     }
@@ -273,12 +273,13 @@ INT16S GetBit(void) { /* get one bit */
     return(i < 0);
 }
 
-INT16S GetByte(void) {    /* get a byte */
+INT16S GetByte(void *buf) {    /* get a byte */
     INT16U i;
-
+    char *buf_t = (char *)buf;
     while (getlen <= 8) {
-        if ((i = getc(infile)) < 0) i = 0;
-        printf(" Infile Positon: %ld \n", ftell(infile));
+        i = buf_t[p++];
+        if (i < 0) i = 0;
+        //printf(" Infile Positon: %ld \n", ftell(infile));
         getbuf |= i << (8 - getlen);
         getlen += 8;
     }
@@ -291,7 +292,7 @@ INT16S GetByte(void) {    /* get a byte */
 INT16U putbuf = 0;
 uchar putlen = 0;
 
-void Putcode(INT16S l, INT16U c) {        /* output c bits */
+/*void Putcode(INT16S l, INT16U c) {
     putbuf |= c >> putlen;
     if ((putlen += l) >= 8) {
         putc(putbuf >> 8, outfile);
@@ -308,7 +309,7 @@ void Putcode(INT16S l, INT16U c) {        /* output c bits */
             codesize++;
         }
     }
-}
+} */
 
 
 /* initialize freq tree */
@@ -356,7 +357,7 @@ void reconst() {
         k++;
         l = (j - k) * 2;
 
-        /* movmem() is Turbo-C dependent  
+        /* movmem() is Turbo-C dependent
            rewritten to memmove() by Kenji */
 
         /* movmem(&freq[k], &freq[k + 1], l);*/
@@ -414,6 +415,7 @@ void update(INT16S c) {
 
 INT16U code, len;
 
+#if 0
 void EncodeChar(INT16U c) {
     INT16U i;
     INT16S j, k;
@@ -426,9 +428,9 @@ void EncodeChar(INT16U c) {
     do {
         i >>= 1;
 
-        /*  
-        if node's address is odd, output 1  
-        else output 0  
+        /*
+        if node's address is odd, output 1
+        else output 0
         */
         if (k & 1) i += 0x8000;
 
@@ -439,6 +441,8 @@ void EncodeChar(INT16U c) {
     len = j;
     update(c);
 }
+
+
 
 void EncodePosition(INT16U c) {
     INT16U i;
@@ -459,18 +463,20 @@ void EncodeEnd() {
     }
 }
 
-INT16S DecodeChar() {
+#endif
+
+INT16S DecodeChar(void *buf) {
     INT16U c;
 
     c = son[R];
 
-    /*  
-     * start searching tree from the root to leaves.  
-     * choose node #(son[]) if input bit == 0  
-     * else choose #(son[]+1) (input bit == 1)  
+    /*
+     * start searching tree from the root to leaves.
+     * choose node #(son[]) if input bit == 0
+     * else choose #(son[]+1) (input bit == 1)
      */
     while (c < T) {
-        c += GetBit();
+        c += GetBit(buf);
         c = son[c];
     }
     c -= T;
@@ -478,24 +484,24 @@ INT16S DecodeChar() {
     return c;
 }
 
-INT16S DecodePosition() {
+INT16S DecodePosition(void *buf) {
     INT16U i, j, c;
 
     /* decode upper 6 bits from given table */
-    i = GetByte();
+    i = GetByte(buf);
     c = (unsigned)d_code[i] << 6;
     j = d_len[i];
 
     /* input lower 6 bits directly */
     j -= 2;
     while (j--) {
-        i = (i << 1) + GetBit();
+        i = (i << 1) + GetBit(buf);
     }
     return c | i & 0x3f;
 }
 
 /* Compression */
-
+#if 0
 void Encode(void) {  /* Encoding/Compressing */
     INT16S i, c, len, r, s, last_match_length;
 
@@ -552,117 +558,54 @@ void Encode(void) {  /* Encoding/Compressing */
     printf("output: %ld bytes\n", codesize);
     printf("output/input: %.3f\n", (double)codesize / textsize);
 }
+#endif
 
-void Decode(void) {  /* Decoding/Uncompressing */
+void coDecrypt(void *buf, INT32U len, void *debuf){  /* Decoding/Uncompressing */
     INT16S i, j, k, r, c;
     INT32U count;
-
-    if (fread(&textsize, sizeof textsize, 1, infile) < 1) Error("Unable to read");  /* read size of original text */
-    if (textsize == 0) return;
+    char *buf_t = buf;
+    char *out = debuf;
+    textsize = *(INT32U *)buf;
+    if (textsize == 0)
+        return;
     StartHuff();
-    for (i = 0; i < N - F; i++) text_buf[i] = ' ';
+    for (i = 0; i < N - F; i++)
+        text_buf[i] = ' ';
     r = N - F;
-    for (count = 0; count < textsize;) {
-        c = DecodeChar();
+    for (count = 0; count < textsize; ) {
+        c = DecodeChar(buf_t+4);
         if (c < 256) {
-            putc(c, outfile);
-            printf("Positon: %ld \n", ftell(outfile));
+            //putc(c, outfile);
+            //printf("Positon: %ld \n", ftell(outfile));
+            *out++ = c;
             text_buf[r++] = c;
-            r &= (N - 1);
+            r &=(N - 1);
             count++;
         } else {
-            i = (r - DecodePosition() - 1) & (N - 1);
+            i = (r - DecodePosition(buf_t+4)- 1)&(N - 1);
             j = c - 255 + THRESHOLD;
             for (k = 0; k < j; k++) {
-                c = text_buf[(i + k) & (N - 1)];
-                putc(c, outfile);
-                printf("Positon: %ld \n", ftell(outfile));
+                c = text_buf[(i + k)&(N - 1)];
+                //putc(c, outfile);
+                //printf("Positon: %ld \n", ftell(outfile));
+                *out++ = c;
                 text_buf[r++] = c;
-                r &= (N - 1);
+                r &=(N - 1);
                 count++;
             }
         }
-        if (count > printcount) {
+        /*if (count > printcount) {
             printf("%12ld\r", count);
             printcount += 1024;
-        }
+        }*/
     }
-    printf("%12ld\n", count);
-}
-//extern "C"  int __stdcall  eDecode(char * inpath,char * outpath,int checkcode)
-int __stdcall eDecode(char *inpath, char *outpath, int checkcode) {
-
-    if (checkcode == 26816) {
-        textsize = 0;
-        codesize = 0;
-        printcount = 0;
-        getbuf = 0;
-        getlen = 0;
-        putbuf = 0;
-        putlen = 0;
-        infile = fopen(inpath, "rb");
-        outfile = fopen(outpath, "wb");
-
-        /*Encode();*/
-        Decode();
-        fclose(infile); fclose(outfile);
-        return 1;
-
-    }
-    return checkcode;
-}
-//extern "C" __declspec(dllexport) int   eEncode(char * inpath,char * outpath,int checkcode)
-int __stdcall eEncode(char *inpath, char *outpath, int checkcode) {
-
-    if (checkcode == 22568) {
-        textsize = 0;
-        codesize = 0;
-        printcount = 0;
-        getbuf = 0;
-        getlen = 0;
-        putbuf = 0;
-        putlen = 0;
-        infile = fopen(inpath, "rb");
-        outfile = fopen(outpath, "wb");
-
-        Encode();
-        //Decode();
-        fclose(infile); fclose(outfile);
-        return 1;
-
-    }
-    return checkcode;
+    //printf("%12ld\n", count);
 }
 
 
-int eEncode1(char *inpath, char *outpath) {
-
-    if (checkcode == 22568) {
-        textsize = 0;
-        codesize = 0; 
-        printcount = 0;
-        getbuf = 0;
-        getlen = 0;
-        putbuf = 0;
-        putlen = 0;
-        infile = fopen(inpath, "rb");
-        outfile = fopen(outpath, "wb");
-
-        Encode();
-        //Decode();
-        fclose(infile); 
-        fclose(outfile);
-        return 1;
-
-    }
-    return checkcode;
+unsigned int coDecrypteSize(void *in) {
+    unsigned int *data = in;
+    return *data;
 }
 
 
-//extern "C" __declspec(dllexport) int __stdcall test(int t)
-int __stdcall test(int t) {
-    int x;
-    x = t + 10;
-    return x;
-
-}
