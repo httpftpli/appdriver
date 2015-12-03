@@ -453,6 +453,8 @@ typedef struct {
 
 typedef struct {
     CO_GUID *co_guid;
+    uint16 ifeed;
+    uint16 type;
     uint32 step;
     uint32 disaddr;
     uint32 lineNum;
@@ -534,10 +536,9 @@ typedef struct {
     uint8 haveSel;
     uint32 jacsnum[FEED_NUM];
     SEL_JAC  *jacs[FEED_NUM][SEL_PRI_NUM];
-    //uint32 fingernum[FEED_NUM];
-    SEL_GUID *finger[FEED_NUM];
-    //uint32 camnum[FEED_NUM];
-    SEL_GUID   *cam[FEED_NUM];
+    uint32 guidNum;
+    SEL_GUID *guid[16];
+    //SEL_GUID   *cam[FEED_NUM];
     //struct list_head jacs[FEED_NUM];
     struct list_head *func;
     struct list_head *fengmen;
@@ -612,8 +613,7 @@ struct __S_CO_RUN {
 
 #define LINE_FLAG_ACT 0x02
 #define LINE_FLAG_SEL 0x100
-#define LINE_FLAG_SEL_FINGER 0x400
-#define LINE_FLAG_SEL_CAM   0x200
+#define LINE_FLAG_SEL_GUID   0x200
 
 
 #define COMMON_FUNCODE_4_CODE  0x00
@@ -695,10 +695,12 @@ struct __machine_str_tag {
     uint32 niddleNum;
     uint32 feedNum;
     uint32 selPreNiddleNum;
+    bool niddleNumCheck;
     void (*fun0203Resolve)(uint16 codevalue, uint16 *valvecode, uint32 *valnum);
     void (*fun031eToValvecode)(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                                uint16 *alarmcode, uint32 *alarmnum);
     void (*funcode2Alarm)(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+    void (*funCamResolve)(FUNC *fun, uint16 *valvecode, uint32 *num);
 };
 
 
@@ -738,7 +740,7 @@ extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RU
 extern void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line);
 extern void coRelease(S_CO *co);
 extern uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize);
-extern uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[]);
+extern uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[],uint32 valveNum);
 #define CN_OK  0
 #define CN_READ_ERROR    -1
 #define CN_FILE_ERROR    -2

@@ -18,7 +18,7 @@
 
 #define MOTOR_SCALE   1
 #define FILEPATH  L"1:\\"
-#define BTSR_DIS_BUF_SIZE 512*1024
+//#define BTSR_DIS_BUF_SIZE 512*1024
 #define BTSR_DIS_BUF_CNT  6
 
 
@@ -45,7 +45,7 @@ static struct list_head btsr_freelist;
 static struct list_head btsrlist;
 
 
-static unsigned char cofilebuf[1024 * 2048];
+//static unsigned char cofilebuf[1024 * 2048];
 
 //static ACT_GROUP act360[360];
 
@@ -78,7 +78,7 @@ static uint32 get_co_check(void *buf, uint32 dwSize) {
 
 
 
-static OS_MEM jacmem,btsr_dis_mem,guidmem;
+static OS_MEM jacmem,guidmem; //,btsr_dis_mem
 
 
 MACHINE machine;
@@ -93,6 +93,11 @@ static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *va
 static void L04E7_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                                   uint16 *alarmcode, uint32 *alarmnum);
 static void L04E7_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+
+static void L10L12_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
+static void L04E7_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
+
+
 
 
 void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum) {
@@ -125,14 +130,14 @@ void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum) {
     //creat jacq memery pool
     static SEL_JAC jacpool[1000];
     static SEL_GUID guidpool[30];
-    static char btsr_dis_buf[BTSR_DIS_BUF_CNT][BTSR_DIS_BUF_SIZE];
+    //static char btsr_dis_buf[BTSR_DIS_BUF_CNT][BTSR_DIS_BUF_SIZE];
     MEM_ERR memerr;
     MemCreate(&jacmem, "jacq memery pool", jacpool, lenthof(jacpool), sizeof(SEL_JAC), &memerr);
     ASSERT(memerr == MEM_ERR_NONE);
     MemCreate(&guidmem, "guid memery pool", guidpool, lenthof(guidpool), sizeof(SEL_GUID), &memerr);
     ASSERT(memerr == MEM_ERR_NONE);
-    MemCreate(&btsr_dis_mem, "btsr dis memery", btsr_dis_buf, BTSR_DIS_BUF_CNT, BTSR_DIS_BUF_SIZE, &memerr);
-    ASSERT(memerr == MEM_ERR_NONE);
+    //MemCreate(&btsr_dis_mem, "btsr dis memery", btsr_dis_buf, BTSR_DIS_BUF_CNT, BTSR_DIS_BUF_SIZE, &memerr);
+    //ASSERT(memerr == MEM_ERR_NONE);
     ASSERT(niddleNum % 16 == 0);
     machine.niddleNum = niddleNum;
     machine.feedNum = 4;
@@ -142,10 +147,14 @@ void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum) {
         machine.fun0203Resolve = L10L12_fun0203Resolve;
         machine.fun031eToValvecode = L10L12_031eToValvecode;
         machine.funcode2Alarm = L10L12_funcode2Alarm;
+        machine.niddleNumCheck = false;
+        machine.funCamResolve = L10L12_camcode2Valvecode;
     } else if (strcmp(machinename, "L04E7") == 0) {
         machine.fun0203Resolve = L04E7_fun0203Resolve;
         machine.fun031eToValvecode = L04E7_031eToValvecode;
         machine.funcode2Alarm = L04E7_funcode2Alarm;
+        machine.niddleNumCheck = true;
+        machine.funCamResolve = L04E7_camcode2Valvecode;
     } else {
         while (1);
     }
@@ -364,7 +373,7 @@ static int32 co_read_reset(S_CO *co, uint8 resetpartbuf[], bool checkNiddleNum) 
     memcpy(&co->resetinfo, info, sizeof*info);
 
     co->diameter = info->diameter;
-    if (checkNiddleNum && info->niddle != machine.niddleNum) {
+    if (co->machine->niddleNumCheck && checkNiddleNum && info->niddle != machine.niddleNum) {
         return MACHINE_NIDDLE_NUM_NOT_MATCH;
     }
     co->niddle = info->niddle;
@@ -564,11 +573,14 @@ bool coMd5(const TCHAR *path, void *md5, int md5len) {
 int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
     FIL file;
     unsigned int br;
+    void *cofilebuf = NULL;
     int32 re = CO_FILE_READ_OK;
 
     if (co->parsed) {
         return CO_PARSE_PARSED_ERROR;
     }
+
+    co->machine = &machine;
 
     //do co struct init
     for (int i = 0; i < lenthof(co->func); i++) {
@@ -610,9 +622,11 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
         goto ERROR;
     }
 
+    cofilebuf = malloc(f_size(&file));
+    ASSERT(cofilebuf!=NULL);
     //READ CO RESET SECTION(section0)
     f_lseek(&file, co->head.sec[0].offset << 8);
-    r = f_read(&file, &cofilebuf, co->head.sec[0].len << 8, &br);
+    r = f_read(&file, cofilebuf, co->head.sec[0].len << 8, &br);
     if (r != FR_OK || br != co->head.sec[0].len << 8) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -628,7 +642,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
     //READ CO YARN SECTION(section 1)
     f_lseek(&file, co->head.sec[1].offset << 8);
-    r = f_read(&file, &cofilebuf, co->head.sec[1].len << 8, &br);
+    r = f_read(&file, cofilebuf, co->head.sec[1].len << 8, &br);
     if (r != FR_OK || br != co->head.sec[1].len << 8) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -641,7 +655,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
     //READ CO CATE SECTION(section 2)
     f_lseek(&file, co->head.sec[2].offset << 8);
-    r = f_read(&file, &cofilebuf, co->head.sec[2].len << 8, &br);
+    r = f_read(&file, cofilebuf, co->head.sec[2].len << 8, &br);
     if (r != FR_OK || br != co->head.sec[2].len << 8) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -657,7 +671,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
     //READ CO MPP SECTION(section 3)
     f_lseek(&file, co->head.sec[3].offset << 8);
-    r = f_read(&file, &cofilebuf, co->head.sec[3].len << 8, &br);
+    r = f_read(&file, cofilebuf, co->head.sec[3].len << 8, &br);
     if (r != FR_OK || br != co->head.sec[3].len << 8) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -673,7 +687,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
     //READ CO JACQ SECTION(section 4)
     f_lseek(&file, co->head.sec[4].offset << 8);
     jacqsize = co->head.sec[4].len << 8;
-    r = f_read(&file, &cofilebuf, jacqsize, &br);
+    r = f_read(&file, cofilebuf, jacqsize, &br);
     if (r != FR_OK || br != jacqsize) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -688,7 +702,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
     f_lseek(&file, co->head.sec[5].offset << 8);
     guidsize = co->head.sec[5].len << 8;
-    r = f_read(&file, &cofilebuf, guidsize, &br);
+    r = f_read(&file, cofilebuf, guidsize, &br);
     if (r != FR_OK || br != guidsize) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -703,7 +717,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
     //READ CO DIS SECTION(section 6)
     f_lseek(&file, co->head.sec[6].offset << 8);
     dissize = co->head.sec[6].len << 8;
-    r = f_read(&file, &cofilebuf, dissize, &br);
+    r = f_read(&file, cofilebuf, dissize, &br);
     if (r != FR_OK || br != dissize) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -717,7 +731,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
     //READ CO SUPE SECTION(section 7)
     f_lseek(&file, co->head.sec[7].offset << 8);
-    r = f_read(&file, &cofilebuf, co->head.sec[7].len << 8, &br);
+    r = f_read(&file, cofilebuf, co->head.sec[7].len << 8, &br);
     if (r != FR_OK || br != co->head.sec[7].len << 8) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
@@ -730,13 +744,20 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
 
     f_close(&file);
-    co->machine = &machine;
     co->parsed = true;
+    if (cofilebuf!=NULL) {
+        free(cofilebuf);
+        cofilebuf = NULL;
+    }
     return re;
 
     ERROR:
     if (offset != NULL) {
         *offset = (uint32)f_tell(&file);
+    }
+    if (cofilebuf!=NULL) {
+        free(cofilebuf);
+        cofilebuf = NULL;
     }
     f_close(&file);
     co->parsed = false;
@@ -867,6 +888,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
     uint32 br, wr;;
     struct list_head *p;
     FIL file;
+    char *cofilebuf =NULL;
     CO_HEADER *cohead;
     CO_SPEED *cospeed;
     CO_SIZEMOTOR_ZONE *cosizemotor;
@@ -878,7 +900,8 @@ int32 coSave(S_CO *co, TCHAR *path) {
         re = CO_FILE_WRITE_ERROR;
         return re;
     }
-
+    cofilebuf = malloc(f_size(&file));
+    ASSERT(cofilebuf!=NULL);
     r = f_read(&file, cofilebuf, f_size(&file), &br);
     if (r != FR_OK && br != f_size(&file)) {
         re = CO_FILE_WRITE_ERROR;
@@ -954,10 +977,18 @@ int32 coSave(S_CO *co, TCHAR *path) {
         goto ERROR;
     }
     f_close(&file);
+    if (cofilebuf !=NULL) {
+        free(cofilebuf);
+        cofilebuf = NULL;
+    }
     return re;
 
     ERROR:
     f_close(&file);
+    if (cofilebuf !=NULL) {
+        free(cofilebuf);
+        cofilebuf = NULL;
+    }
     return re;
 }
 
@@ -1196,8 +1227,12 @@ static void cocreateindex_jacq(S_CO_RUN *co_run, S_CO *co) {
             jac->disinfo = (DISINFO *)(((DISHEAD *)co->dis)->selInfoAddr
                                        + co_jac->disinfoAddr
                                        + (int32)co->dis);
+            if (co_jac->selType != 0x0d) {//not SLZ    0x0a:pat
+                co_jac->outStep++ ;
+            }
             jac->co_jac = co_jac;
             jac->step = istep;
+
             for (int i = istep; i <= co_jac->outStep; i++) {
                 step = co_run->stepptr[i];
                 ASSERT(step->jacsnum[isel] < SEL_PRI_NUM);
@@ -1220,10 +1255,16 @@ static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
     co_run->selguidnum = 0;
     //parsed guid
     MEM_ERR memerr;
+    S_CO_RUN_STEP *step;
+    for (int i=0;i<co->numofstep;i++) {
+        step = co_run->stepptr[i];
+        step->guidNum = 0;
+    }
+
     for (int istep = 0; istep < co->numofstep; istep++) {
         offset = *((unsigned int *)p + istep);
         CO_GUID *co_guid = (CO_GUID *)(offset + head->addrBegin + (int32)co->guid);
-        S_CO_RUN_STEP *step = co_run->stepptr[istep];
+        step = co_run->stepptr[istep];
         for (; co_guid->ifeed != 0x80000000; co_guid++) {
             unsigned int ifeed = co_guid->ifeed;
             SEL_GUID *guid = MemGet(&guidmem, &memerr);
@@ -1233,17 +1274,14 @@ static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
                              + co_guid->addr
                              + (int32)co->dis;
             guid->co_guid = co_guid;
+            guid->ifeed = ifeed % FEED_NUM;
+            guid->type = ifeed / FEED_NUM;
+            co_guid->outStep++;  //outStep plus 1 ,ref jac
             guid->step = istep;
             for (int i = istep; i <= co_guid->outStep; i++) {
                 step = co_run->stepptr[i];
-                if (ifeed / co->machine->feedNum) { //CAM
-                    ifeed %= 4;
-                    step->cam[ifeed] = guid;
-                    step->haveSel |= 0x02;
-                } else {
-                    step->finger[ifeed] = guid;
-                    step->haveSel |= 0x04;
-                }
+                step->guid[step->guidNum++] = guid;
+                step->haveSel |= 0x02;
             }
         }
     }
@@ -1320,9 +1358,11 @@ static BTSR* allocBtsr(S_CO_RUN *co_run, int32 num, int32 point, int cosize) {
     btsr->cosize = cosize;
     uint32 numofline = btsr->numofline = co_run->numofline[cosize];
     uint32 btsrdatasize = num * numofpoint * numofline;
-    MEM_ERR memerr;
-    btsr->data = (char *)MemGet(&btsr_dis_mem, &memerr);
-    ASSERT(btsr->data != NULL && memerr == MEM_ERR_NONE && btsrdatasize <= BTSR_DIS_BUF_SIZE);
+    //MEM_ERR memerr;
+    //btsr->data = (char *)MemGet(&btsr_dis_mem, &memerr);
+    btsr->data = (char *)malloc(btsrdatasize);
+    //ASSERT(btsr->data != NULL && memerr == MEM_ERR_NONE && btsrdatasize <= BTSR_DIS_BUF_SIZE);
+    ASSERT(btsr->data != NULL);
     btsr->datapointer = 0;
     ASSERT(wcslen(co->filename) < 50);
     wcscpy(btsr->name, co->filename);
@@ -1339,9 +1379,10 @@ static void freeBtsr(S_CO_RUN *co_run) {
     BTSR *btsr = co_run->btsr;
     if (--btsr->ref == 0) { //only 1 ref,  release btsr
         if (btsr->data) {
-            MEM_ERR memerr;
-            MemPut(&btsr_dis_mem, btsr->data, &memerr);
-            ASSERT(memerr == MEM_ERR_NONE);
+            //MEM_ERR memerr;
+            //MemPut(&btsr_dis_mem, btsr->data, &memerr);
+            //ASSERT(memerr == MEM_ERR_NONE);
+            free(btsr->data);
             btsr->data = NULL;
         }
         list_move(&btsr->list, &btsr_freelist);
@@ -1611,33 +1652,38 @@ typedef struct {
 
 
 
-static uint16 fingercamcode[FEED_NUM][10] = {
+static uint16 fingercamcode[FEED_NUM*2][10] = {
     { Gu1_1, Gu2_1, Gu3_1, Gu4_1, Gu5_1, Gu6_1, Gu1v1, Gu3v1, GURF1, GURA1},
     { Gu1_2, Gu2_2, Gu3_2, Gu4_2, Gu5_2, Gu6_2, Gu1v2, Gu3v2, GURF2, GURA2},
     { Gu1_3, Gu2_3, Gu3_3, Gu4_3, Gu5_3, Gu6_3, Gu1v3, Gu3v3, GURF3, GURA3},
-    { Gu1_4, Gu2_4, Gu3_4, Gu4_4, Gu5_4, Gu6_4, Gu1v4, Gu3v4, GURF4, GURA4}
+    { Gu1_4, Gu2_4, Gu3_4, Gu4_4, Gu5_4, Gu6_4, Gu1v4, Gu3v4, GURF4, GURA4},
+    { EV39,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
+    { EV40,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
+    { EV41,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
+    { EV42,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
 };
 
 
-uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[]) {
+uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[],uint32 valveNum) {
     uint32 codenum = 0;
     uint32 machineNiddleNum = machine.niddleNum;
     //niddle += (niddle + machine.selPreNiddleNum) / machineNiddleNum;
     uint32 line = run_line->iline;
     S_CO_RUN_STEP *step = co_run->stepptr[run_line->istep];
-    for (int i = 0; i < FEED_NUM; i++) {
-        SEL_GUID *guid = step->finger[i];
-        if (guid == NULL) {
+    for (int i = 0; i < step->guidNum; i++) {
+        SEL_GUID *guid = step->guid[i];
+        /*if (guid == NULL) {
             continue;
-        }
-        uint32 guidbaseline = co_run->stepptr[guid->step]->ilinetag[cosize];
-        uint32 outstep_p1 = guid->co_guid->outStep + 1;
+        }*/
+        int32 guidbaseline = co_run->stepptr[guid->step]->ilinetag[cosize];
+        /*uint32 outstep_p1 = guid->co_guid->outStep + 1;
         uint32 guidendline;
         if (outstep_p1 != co_run->numofstep) {
             guidendline = co_run->stepptr[outstep_p1]->ilinetag[cosize] - 1;
         } else {
             guidendline = co_run->numofline[cosize] - 1;
-        }
+        }*/
+        int32 guidendline = co_run->stepptr[guid->co_guid->outStep]->ilinetag[cosize];
         int32 niddlebegin = guid->co_guid->inNiddle;
         int32 niddleoff = machineNiddleNum * (line - guidbaseline) + niddle - niddlebegin;
         int32 niddleoffmax = machineNiddleNum * (guidendline - guidbaseline) + guid->co_guid->outNiddle - guid->co_guid->inNiddle;
@@ -1659,15 +1705,18 @@ uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned
 
             for (int j = 0; act[j].niddle != 0xffff; j++) {
                 if (act[j].niddle == iguid) {
-                    valveCode[codenum] = fingercamcode[i][act[j].act];
+                    valveCode[codenum] = fingercamcode[guid->co_guid->ifeed][act[j].act];
                     valveCode[codenum] |= !!act[j].state << 12;
                     codenum++;
+                    ASSERT(codenum<=valveNum);
                 }
             }
         }
     }
     return codenum;
 }
+
+
 
 
 int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *preline, uint32 size) {
@@ -1780,20 +1829,22 @@ uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int nid
     for (int i = 0; i < FEED_NUM; i++) {
         for (int j = 0; j < step->jacsnum[i]; j++) {
             SEL_JAC *jac = step->jacs[i][j];
-            uint32 jacbaseline = co_run->stepptr[jac->step]->ilinetag[cosize];
-            uint32 outstep_p1 = jac->co_jac->outStep + 1;
+            int32 jacbaseline = co_run->stepptr[jac->step]->ilinetag[cosize];
+            /*uint32 outstep_p1 = jac->co_jac->outStep + 1;
             uint32 jacendline;
             if (outstep_p1 != co_run->numofstep) {
                 jacendline = co_run->stepptr[outstep_p1]->ilinetag[cosize] - 1;
             } else {
                 jacendline = co_run->numofline[cosize] - 1;
-            }
+            }*/
+            int32 jacendline = co_run->stepptr[jac->co_jac->outStep]->ilinetag[cosize];
+
             int32 niddlebegin = jac->co_jac->inNiddle;
             int32 niddleoff = machineNiddleNum * (line - jacbaseline) + niddle - niddlebegin;
-            int32 niddleoffmax = machineNiddleNum * (jacendline - jacbaseline) + jac->co_jac->outNiddle - jac->co_jac->inNiddle;
+            int32 niddleoffmax = machineNiddleNum * (jacendline - jacbaseline) + jac->co_jac->outNiddle - niddlebegin;
             if (niddleoff >= 0 && niddleoff <= niddleoffmax) {
-                uint32 jacloopniddle = jac->disinfo->num * machineNiddleNum; //diddle num per jac loop
-                uint32 jacniddleinloop = niddleoff % jacloopniddle;  //diddle in loop
+                uint32 jacloopniddle = jac->disinfo->num * machineNiddleNum; //niddle num per jac loop
+                uint32 jacniddleinloop = niddleoff % jacloopniddle;  //niddle in loop
                 uint32 jacline = jacniddleinloop / machineNiddleNum; // jacq line
                 uint32 ijac = jacniddleinloop % machineNiddleNum;
                 uint32 jacrange = jac->disinfo->endNiddle - jac->disinfo->beginNiddle;
@@ -1838,74 +1889,6 @@ uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int nid
 
 
 
-#if 0
-uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize) {
-    uint8 seldata = 0,selmask = 0;
-    uint8 slzseldata = 0,slzselmask = 0;
-    uint8 patseldata = 0,patselmask = 0;
-    uint8 patsupand = 0xff , patsupor = 0;
-    for (int i = 0; i < FEED_NUM; i++) {
-        S_CO_RUN_STEP *step = co_run->stepptr[run_line->istep];
-        uint32 line = run_line->iline;
-        for (int j=0;j<step->jacsnum[i];j++) {
-            SEL_JAC *jac = step->jacs[i][j];
-            uint32 jacbaseline = co_run->stepptr[jac->step]->ilinetag[cosize];
-            uint32 outstep_p1 = jac->co_jac->outStep + 1;
-            uint32 jacendline;
-            if (outstep_p1 != co_run->numofstep) {
-                jacendline = co_run->stepptr[outstep_p1]->ilinetag[cosize] - 1;
-            } else {
-                jacendline = co_run->numofline[cosize] - 1;
-            }
-            int32 niddlebegin = jac->co_jac->inNiddle;
-            int32 niddleoff = machineNiddleNum * (line - jacbaseline) + niddle - niddlebegin;
-            int32 niddleoffmax = machineNiddleNum * (jacendline - jacbaseline) + jac->co_jac->outNiddle - jac->co_jac->inNiddle;
-            if (niddleoff >= 0 && niddleoff <= niddleoffmax) {
-                uint32 jacloopniddle = jac->disinfo->num * machineNiddleNum; //diddle num per jac loop
-                uint32 jacniddleinloop = niddleoff % jacloopniddle;  //diddle in loop
-                uint32 jacline = jacniddleinloop / machineNiddleNum; // jacq line
-                uint32 ijac = jacniddleinloop % machineNiddleNum;
-                uint32 jacrange = jac->disinfo->endNiddle - jac->disinfo->beginNiddle;
-                if (ijac > jacrange) {
-                    continue;
-                }
-                uint32 ijacdword = ijac / 32;
-                uint32 ijacbitmask = 1 << (31 - ijac % 32);
-                uint32 jackcodataaddr = *(&jac->disinfo->num + jacline+1) +
-                                        (uint32)co_run->co->dis +
-                                        ((DISHEAD *)(co_run->co->dis))->selDataAddr;
-
-                uint32 jackcodata = ((CO_DIS_DATA *)jackcodataaddr) -> data[ijacdword];
-
-                switch (jac->co_jac->selType) {
-                case JACQTYPE_SLZ:
-                    slzseldata |= !!(jackcodata & ijacbitmask) << i;
-                    slzselmask |= (1 << i);
-                    break;
-                case JACQTYPE_PAT:
-                    patseldata |= !!(jackcodata & ijacbitmask) << i;
-                    patselmask |= (1 << i);
-                    break;
-                case JACQTYPE_SUP0:
-                    //patsupand  &=  !!(jackcodata & ijacbitmask)<<i;
-                    break;
-                case JACQTYPE_SUP1:
-                    //patsupor  |= !!(jackcodata & ijacbitmask)<<i;
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-    }
-    selmask = slzselmask | patselmask;
-    //patseldata &= patsupand;
-    //patseldata |= patsupor;
-    seldata = (patseldata & ~slzselmask) | (slzseldata & slzselmask);
-    return(selmask | !!selmask<<7)<<8 | seldata;
-}
-
-#endif
 
 
 void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
@@ -2292,7 +2275,7 @@ static uint16 common0506func2Valvecode(uint16 funcval) {
 
 
 
-static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
+static void L04E7_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
         { { 0, 293, 113 }, { 0, 293, 113}, { 0, 293, 113}},
         { { 0, 23, 203}, { 0, 23, 203}, { 0, 23, 203}},
@@ -2306,10 +2289,63 @@ static void camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
     uint32 feed = fun->value / 9;
 
     *num = 0;
-    /*if (caminoutmap[feed][sxt][pos_ace] == 0xffff) {
+    if (caminoutmap[feed][sxt][pos_ace] == fun->angular) {
+        in = true;
+    }
+    switch (pos_ace) {
+    case 0: //A
+        if (in == false) {
+            valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan out
+            valvecode[1] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban out
+            *num = 2;
+        } else {
+            //TODO GUIDE
+        }
+        break;
+    case 1: //C
+        if (in == true) {
+            valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban in
+            *num = 1;
+        } else {
+            valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan out
+            *num = 1;
+        }
+        break;
+    case 2: //E
+        if (in == true) {
+            //ban in,quan in
+            valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 0; //ban in
+            valvecode[1] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + sxt * 2 + 1; //quan in
+            *num = 2;
+        } else {
+            //TODO GUIDE
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+
+static void L10L12_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
+
+    static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
+        { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}},
+         { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}},
+          { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}},
+          { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
+    };
+
+    bool in = false;
+    uint32 pos_ace = fun->value % 3;
+    uint32 sxt = fun->value / 3 % 3;
+    uint32 feed = fun->value / 9;
+
+    *num = 0;
+    if (caminoutmap[feed][sxt][pos_ace] == 0xffff) {
         //TODO guide
         return;
-    }*/
+    }
     if (caminoutmap[feed][sxt][pos_ace] == fun->angular) {
         in = true;
     }
@@ -2554,7 +2590,7 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         *valnum = 1;
         break;
     case 0x0305:  //cam
-        camcode2Valvecode(fun, valvecode, valnum);
+        machine.funCamResolve(fun, valvecode, valnum);
         if (*valnum != 0) {
             *flag |= LINE_FLAG_ACT;
         }
