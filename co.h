@@ -37,7 +37,8 @@ typedef __packed struct {
     char name[4];
     uint16 offset;
     uint16 len;
-    char unkown2[17];
+    uint16 decryptedLen;
+    char unkown2[15];
     uint32 check;
 }
 CO_SECTION;
@@ -722,6 +723,12 @@ struct __machine_str_tag {
 
 
 
+typedef struct {
+    uint16 valveCode;
+    const char *nickname;
+    bool inout;
+}QIFA_ACT ;
+
 
 //==============================================================================
 //==============================================================================
@@ -747,14 +754,22 @@ extern uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, u
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co, unsigned int num);
 extern int cnParse(const TCHAR *path, S_CN_GROUP *val);
 extern void coRunInitBtsr(S_CO_RUN *co_run, int numofBtsr, int numofpoint, int co_size);
-extern void coRunBtsrBeginStudy(S_CO_RUN *co_run);
+extern void coRunBtsrBeginStudy(S_CO_RUN *co_run,uint32 line);
 extern void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size);
 extern bool coRunBtsrSave(S_CO_RUN *co_run);
 extern bool coRunBtsrData(S_CO_RUN *co_run, int32 iline,void **data,uint32 *datasize);
 extern bool coRunIsBtsrDataAvailable(S_CO_RUN *co_run);
 
+
+/******************CO TEST*************************/
+#define CO_TEST_FLAG_FUNC               0x01
+#define CO_TEST_FLAG_JACQ                0x02
+#define CO_TEST_FLAG_GUID_FIGNER        0x04
+#define CO_TEST_FLAG_GUID_CAM           0x08
+
 extern bool coActTestBegin(const TCHAR *filepath,S_CO_RUN *co);
 extern void coActTest(S_CO_RUN_LINE *line);
 extern void coActTestEnd();
+extern void coTest(TCHAR *path, unsigned int flag) ;
 
 #endif

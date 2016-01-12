@@ -52,7 +52,8 @@ static struct list_head btsrlist;
 //static ALARM_GROUP alarm360[360];
 
 
-static uint32 get_co_check(void *buf, uint32 dwSize) {
+//static
+uint32 get_co_check(void *buf, uint32 dwSize) {
     ASSERT(dwSize % 4 == 0);
     int i, j = 0;
     uint32 *buf32;
@@ -465,37 +466,59 @@ static void co_read_supe(S_CO *co, uint8 supepartbuf[]) {
 }
 
 
-
-
-static unsigned int co_read_jacq(S_CO *co, uint8 jacpcrypteddata[], unsigned int size) {
-    unsigned int desize = coDecrypteSize(jacpcrypteddata);
-    unsigned char *p = malloc(desize);
-    ASSERT(p != NULL);
-    coDecrypt(jacpcrypteddata, size, p);
-    co->jacsize = desize;
+static unsigned int co_read_jacq(S_CO *co, uint8 data[], unsigned int cryptedSize, unsigned int decrytedSize) {
+    unsigned char *p;
+    if (decrytedSize != 0) {
+        ASSERT(decrytedSize == coDecrypteSize(data));
+        p = malloc(decrytedSize);
+        ASSERT(p != NULL);
+        coDecrypt(data, cryptedSize, p);
+    } else {
+        decrytedSize = cryptedSize;
+        p = malloc(decrytedSize);
+        ASSERT(p != NULL);
+        memcpy(p, data, decrytedSize);
+    }
+    co->jacsize = decrytedSize;
     co->jac = p;
-    return desize;
+    return decrytedSize;
 }
 
 
-static unsigned int co_read_dis(S_CO *co, uint8 discrypteddata[], unsigned int size) {
-    unsigned int desize = coDecrypteSize(discrypteddata);
-    unsigned char *p = malloc(desize);
-    ASSERT(p != NULL);
-    coDecrypt(discrypteddata, size, p);
-    co->dissize = desize;
+static unsigned int co_read_dis(S_CO *co, uint8 data[], unsigned int cryptedSize, unsigned int decrytedSize) {
+    unsigned char *p;
+    if (decrytedSize != 0) {
+        ASSERT(decrytedSize == coDecrypteSize(data));
+        p = malloc(decrytedSize);
+        ASSERT(p != NULL);
+        coDecrypt(data, cryptedSize, p);
+    } else {
+        decrytedSize = cryptedSize;
+        p = malloc(decrytedSize);
+        ASSERT(p != NULL);
+        memcpy(p, data, decrytedSize);
+    }
+    co->dissize = decrytedSize;
     co->dis = p;
-    return desize;
+    return decrytedSize;
 }
 
-static unsigned int co_read_guid(S_CO *co, uint8 guidcrypted[], unsigned int size) {
-    unsigned int desize = coDecrypteSize(guidcrypted);
-    unsigned char *p = malloc(desize);
-    ASSERT(p != NULL);
-    coDecrypt(guidcrypted, size, p);
-    co->guidsize = desize;
+static unsigned int co_read_guid(S_CO *co, uint8 data[], unsigned int cryptedSize, unsigned int decrytedSize) {
+    unsigned char *p;
+    if (decrytedSize != 0) {
+        ASSERT(decrytedSize == coDecrypteSize(data));
+        p = malloc(decrytedSize);
+        ASSERT(p != NULL);
+        coDecrypt(data, cryptedSize, p);
+    } else {
+        decrytedSize = cryptedSize;
+        p = malloc(decrytedSize);
+        ASSERT(p != NULL);
+        memcpy(p, data, decrytedSize);
+    }
+    co->guidsize = decrytedSize;
     co->guid = p;
-    return desize;
+    return decrytedSize;
 }
 
 
@@ -610,6 +633,10 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
+    if (co->head.machineName[10]!=0) {
+        re = CO_FILE_CHECK_ERROR;
+        goto ERROR;
+    }
     strtrim(temp1, co->head.machineName);
     strtrim(temp2, machine.name);
     if (strcmp(temp1, temp2) != 0) {
@@ -623,7 +650,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
     }
 
     cofilebuf = malloc(f_size(&file));
-    ASSERT(cofilebuf!=NULL);
+    ASSERT(cofilebuf != NULL);
     //READ CO RESET SECTION(section0)
     f_lseek(&file, co->head.sec[0].offset << 8);
     r = f_read(&file, cofilebuf, co->head.sec[0].len << 8, &br);
@@ -696,7 +723,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-    co_read_jacq(co, cofilebuf, jacqsize);
+    co_read_jacq(co, cofilebuf, jacqsize, co->head.sec[4].decryptedLen << 8);
 
     //read co GUID section
 
@@ -711,7 +738,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-    co_read_guid(co, cofilebuf, guidsize);
+    co_read_guid(co, cofilebuf, guidsize, co->head.sec[5].decryptedLen << 8);
 
 
     //READ CO DIS SECTION(section 6)
@@ -726,7 +753,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
-    co_read_dis(co, cofilebuf, dissize);
+    co_read_dis(co, cofilebuf, dissize, co->head.sec[6].decryptedLen << 8);
 
 
     //READ CO SUPE SECTION(section 7)
@@ -745,7 +772,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
 
     f_close(&file);
     co->parsed = true;
-    if (cofilebuf!=NULL) {
+    if (cofilebuf != NULL) {
         free(cofilebuf);
         cofilebuf = NULL;
     }
@@ -755,7 +782,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
     if (offset != NULL) {
         *offset = (uint32)f_tell(&file);
     }
-    if (cofilebuf!=NULL) {
+    if (cofilebuf != NULL) {
         free(cofilebuf);
         cofilebuf = NULL;
     }
@@ -888,7 +915,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
     uint32 br, wr;;
     struct list_head *p;
     FIL file;
-    char *cofilebuf =NULL;
+    char *cofilebuf = NULL;
     CO_HEADER *cohead;
     CO_SPEED *cospeed;
     CO_SIZEMOTOR_ZONE *cosizemotor;
@@ -901,7 +928,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
         return re;
     }
     cofilebuf = malloc(f_size(&file));
-    ASSERT(cofilebuf!=NULL);
+    ASSERT(cofilebuf != NULL);
     r = f_read(&file, cofilebuf, f_size(&file), &br);
     if (r != FR_OK && br != f_size(&file)) {
         re = CO_FILE_WRITE_ERROR;
@@ -977,7 +1004,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
         goto ERROR;
     }
     f_close(&file);
-    if (cofilebuf !=NULL) {
+    if (cofilebuf != NULL) {
         free(cofilebuf);
         cofilebuf = NULL;
     }
@@ -985,7 +1012,7 @@ int32 coSave(S_CO *co, TCHAR *path) {
 
     ERROR:
     f_close(&file);
-    if (cofilebuf !=NULL) {
+    if (cofilebuf != NULL) {
         free(cofilebuf);
         cofilebuf = NULL;
     }
@@ -1064,6 +1091,7 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
     }
     for (int j = 0; j < 8; j++) {
         co_run->stepptr[0]->ilinetag[j] = 0;
+        co_run->numofline[j] = 0;
     }
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
@@ -1210,7 +1238,7 @@ static void cocreateindex_jacq(S_CO_RUN *co_run, S_CO *co) {
     //parsed jacq
     MEM_ERR memerr;
     S_CO_RUN_STEP *step;
-    for (int istep = 0; istep < co->numofstep; istep++){
+    for (int istep = 0; istep < co->numofstep; istep++) {
         step = co_run->stepptr[istep];
         memset(step->jacsnum, 0, sizeof(step->jacsnum));
     }
@@ -1227,8 +1255,8 @@ static void cocreateindex_jacq(S_CO_RUN *co_run, S_CO *co) {
             jac->disinfo = (DISINFO *)(((DISHEAD *)co->dis)->selInfoAddr
                                        + co_jac->disinfoAddr
                                        + (int32)co->dis);
-            if (co_jac->selType != 0x0d) {//not SLZ    0x0a:pat
-                co_jac->outStep++ ;
+            if (co_jac->selType != 0x0d) { //not SLZ    0x0a:pat
+                co_jac->outStep++;
             }
             jac->co_jac = co_jac;
             jac->step = istep;
@@ -1256,7 +1284,7 @@ static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
     //parsed guid
     MEM_ERR memerr;
     S_CO_RUN_STEP *step;
-    for (int i=0;i<co->numofstep;i++) {
+    for (int i = 0; i < co->numofstep; i++) {
         step = co_run->stepptr[i];
         step->guidNum = 0;
     }
@@ -1270,7 +1298,7 @@ static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
             SEL_GUID *guid = MemGet(&guidmem, &memerr);
             ASSERT(memerr == MEM_ERR_NONE && guid != NULL);
             co_run->selguid[co_run->selguidnum++] = guid;
-            guid->disaddr += ((DISHEAD *)co->dis)->guidInfoAddr
+            guid->disaddr = ((DISHEAD *)co->dis)->guidInfoAddr
                              + co_guid->addr
                              + (int32)co->dis;
             guid->co_guid = co_guid;
@@ -1399,12 +1427,14 @@ void coRunInitBtsr(S_CO_RUN *co_run, int numofbtsr, int numofpoint, int co_size)
 }
 
 
-void coRunBtsrBeginStudy(S_CO_RUN *co_run) {
-    if (co_run->btsr) {
-        co_run->btsr->dataAvailable = false;
-        co_run->btsr->datapointer = 0;
-    }
+void coRunBtsrBeginStudy(S_CO_RUN *co_run, uint32 line) {
+    ASSERT(co_run != NULL && co_run->btsr != NULL);
+    BTSR *btsr = co_run->btsr;
+    uint32 sizeofLineData = btsr->num * btsr->point;
+    btsr->dataAvailable = false;
+    btsr->datapointer = sizeofLineData * line;
 }
+
 
 void coRunBtsrStudy(S_CO_RUN *co_run, void *buf, int size) {
     BTSR *btsr = co_run->btsr;
@@ -1653,18 +1683,18 @@ typedef struct {
 
 
 static uint16 fingercamcode[FEED_NUM*2][10] = {
-    { Gu1_1, Gu2_1, Gu3_1, Gu4_1, Gu5_1, Gu6_1, Gu1v1, Gu3v1, GURF1, GURA1},
+    { Gu1_1, Gu2_1, Gu3_1, Gu4_1, Gu5_1, Gu6_1, Gu1v1, Gu3v1, GURF1, GURA1 },
     { Gu1_2, Gu2_2, Gu3_2, Gu4_2, Gu5_2, Gu6_2, Gu1v2, Gu3v2, GURF2, GURA2},
     { Gu1_3, Gu2_3, Gu3_3, Gu4_3, Gu5_3, Gu6_3, Gu1v3, Gu3v3, GURF3, GURA3},
     { Gu1_4, Gu2_4, Gu3_4, Gu4_4, Gu5_4, Gu6_4, Gu1v4, Gu3v4, GURF4, GURA4},
-    { EV39,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
-    { EV40,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
-    { EV41,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
-    { EV42,  NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,   NUd,},
+    { EV39, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd,},
+    { EV40, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd,},
+    { EV41, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd,},
+    { EV42, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd, NUd,},
 };
 
 
-uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[],uint32 valveNum) {
+uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[], uint32 valveNum) {
     uint32 codenum = 0;
     uint32 machineNiddleNum = machine.niddleNum;
     //niddle += (niddle + machine.selPreNiddleNum) / machineNiddleNum;
@@ -1697,18 +1727,18 @@ uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned
             //if (ijac > jacrange) {
             //    continue;
             //}
-            uint32 *feedactaddr =(uint32 *)((uint32)co_run->co->dis
-                                +  dis_entry->addr
-                                + ((DISHEAD *)(co_run->co->dis))->guidInfoAddr);
+            uint32 *feedactaddr = (uint32 *)((uint32)co_run->co->dis
+                                             + dis_entry->addr
+                                             + ((DISHEAD *)(co_run->co->dis))->guidInfoAddr);
 
-            DIS_GUID_ACT *act = (DIS_GUID_ACT *)(feedactaddr[guidline]+((DISHEAD *)(co_run->co->dis))->guidDataAddr+(uint32)co_run->co->dis+2);
+            DIS_GUID_ACT *act = (DIS_GUID_ACT *)(feedactaddr[guidline] + ((DISHEAD *)(co_run->co->dis))->guidDataAddr + (uint32)co_run->co->dis + 2);
 
             for (int j = 0; act[j].niddle != 0xffff; j++) {
                 if (act[j].niddle == iguid) {
                     valveCode[codenum] = fingercamcode[guid->co_guid->ifeed][act[j].act];
                     valveCode[codenum] |= !!act[j].state << 12;
                     codenum++;
-                    ASSERT(codenum<=valveNum);
+                    ASSERT(codenum <= valveNum);
                 }
             }
         }
@@ -1803,7 +1833,7 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *
     }
 
     //jacq guid flag
-    line->flag |= step->haveSel<<8;
+    line->flag |= step->haveSel << 8;
 
     return co_run->numofline[size] - line->iline - 1;
 }
@@ -2331,9 +2361,9 @@ static void L10L12_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) 
 
     static uint16 caminoutmap[4][3][3] = { //[feed][sxt][ace]
         { { 0, 293, 113 }, { 0xffff, 0xffff, 0xffff}, { 0, 293, 113}},
-         { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}},
-          { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}},
-          { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
+        { { 0, 23, 203}, { 0, 23, 23}, { 0, 23, 203}},
+        { { 0, 113, 293}, { 0xffff, 0xffff, 0xffff}, { 0, 113, 293}},
+        { { 0, 203, 23}, { 0, 203, 203}, { 0, 203, 23}},
     };
 
     bool in = false;
@@ -2432,7 +2462,8 @@ static uint16 L04E7_misc0203code2Valvecode(uint16 codevalue) {
         [15] = EV53, [16] = EV54, [17] = EV56, [18] = EV58, [19] = EV59,
         [20] = EV60, [21] = EV67, [22] = EV68, [23] = EV70, [26] = EV79,
         [27] = EV80,[28] = EV81, [29] = EV82, [30] = EV89, [31] = EV90,
-        [32] = EV101, [77] = EV86, [78] = EV87, [81] = EV107, [82] = EV108,
+        [32] = EV101, [33] = EV111,[34] = EV112,[35] = EV113,[36] = EV114,
+        [77] = EV86, [78] = EV87, [81] = EV107, [82] = EV108,
         [83] = EV109, [85] = EV160, [86] = EV161,
     };
 
@@ -2631,27 +2662,33 @@ bool coActTestBegin(const TCHAR *filepath, S_CO_RUN *run) {
 }
 
 
+void actcode2Act(uint32 code, QIFA_ACT *act) {
+    act->inout = !!(code & 1 << 12);
+    act->valveCode = code & ~((uint16)1 << 12);
+    act->nickname = qifaNickName(act->valveCode);
+    if (act->nickname == NULL) {
+        act->nickname = "NULL";
+    }
+}
+
+
 void coActTest(S_CO_RUN_LINE *line) {
     char buf[200];
     uint32 wr;
-    const char *inout;
     if (line->iline != line->co_run->stepptr[line->istep]->ilinetag[0]) {
         return;
     }
     sprintf(buf, "\t step:%3d   line:%3d\r\n\r\n", line->istep, line->iline);
     f_write(&acttestfile, buf, strlen(buf), &wr);
+    QIFA_ACT act;
     for (int i = 0; i < 360; i++) {
         if (line->act[i].num == 0 && line->alarm[i].num == 0) continue;
         sprintf(buf, "\t\t\t angle %3d, act num %d,alarm num %d:", i, line->act[i].num, line->alarm[i].num);
         f_write(&acttestfile, buf, strlen(buf), &wr);
         for (int j = 0; j < line->act[i].num; j++) {
-            inout = (line->act[i].valvecode[j] & 1 << 12) ? "in" : "out";
-            uint16 vavle = line->act[i].valvecode[j] & ~((uint16)1 << 12);
-            const char *qifanickname = qifaNickName(vavle);
-            if (qifanickname == NULL) {
-                qifanickname = "NULL";
-            }
-            sprintf(buf, "\t%s %04x %s", qifanickname, vavle, inout);
+            actcode2Act(line->act[i].valvecode[j], &act);
+            const char *inoutchar = act.inout ? "in" : "out";
+            sprintf(buf, "\t%s %04x %s", act.nickname, act.valveCode, inoutchar);
             f_write(&acttestfile, buf, strlen(buf), &wr);
         }
         for (int j = 0; j < line->alarm[i].num; j++) {
@@ -2668,6 +2705,193 @@ void coActTestEnd() {
     f_close(&acttestfile);
 }
 
+
+
+const unsigned short camoffsetdata[25] = {
+    [20] = 320,  //528
+};
+
+
+const unsigned short jacqoffset[25] = {
+    66, 72, 79, 85, 91,
+    97, 104, 110, 116, 122,
+    129, 135, 141, 147, 154,
+    160, 166, 173, 179, 185,
+    191, 197, 203, 209, 216
+};
+
+
+static void  actuatorOff(const unsigned short feed2OffData[25], unsigned short off[4], unsigned int niddleNnm) {
+    ASSERT(niddleNnm >= 208 && niddleNnm <= 592 && niddleNnm % 16 == 0);
+    unsigned int index = (niddleNnm - 208) / 16;
+    ASSERT(feed2OffData[index] != 0);
+    unsigned short feed2off = feed2OffData[index] - niddleNnm / 4;
+    for (int i = 0; i < 4; i++) {
+        off[i] = niddleNnm - (feed2off + niddleNnm / 4 * i) % niddleNnm;
+    }
+}
+
+
+static unsigned int camEv2Feed(unsigned short ev){
+   ASSERT(ev == EV39 || ev == EV40 || ev == EV41 || ev == EV42);
+   if(ev==EV39){
+      return 0;
+   } else if(ev== EV40){
+       return 1;
+   }else if(ev== EV41){
+       return 2;
+   }else if(ev==EV42){
+      return 3;
+   }
+   return 0;
+}
+
+
+#include "bmp.h"
+
+
+void coTest(TCHAR *path, unsigned int flag) {
+    static S_CO co;
+    static S_CO_RUN_LINE line[2];
+    S_CO_RUN co_run;
+    unsigned int offset;
+    if (coParse(path, &co, 1, &offset) != CO_FILE_READ_OK) {
+        while (1);
+    }
+    S_CO_RUN_LINE *linenow = &line[0];
+    S_CO_RUN_LINE *linenext = &line[1];
+    wchar filename[100];
+    coCreateIndex(&co_run, &co);
+    corunReset(&co_run, linenow);
+    if (flag & CO_TEST_FLAG_FUNC) {
+        wcscpy(filename, path);
+        fileFixNameReplace(filename, L".txt");
+        coActTestBegin(filename, &co_run);
+    }
+    BMP bmpjacq, bmpjacq_raw, bmpfinger;
+    RGBQUAD palette;
+    if (flag & CO_TEST_FLAG_JACQ) {
+        bmpCreate(&bmpjacq, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
+        bmpCreate(&bmpjacq_raw, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
+        palette.rgbReserved = 0;
+        palette.rgbBlue = 0;
+        palette.rgbGreen = 200;
+        palette.rgbRed = 0;
+        bmpAddPalette(&bmpjacq, 1, &palette);
+        bmpAddPalette(&bmpjacq_raw, 1, &palette);
+        palette.rgbBlue = 0;
+        palette.rgbGreen = 0;
+        palette.rgbRed = 0;
+        bmpAddPalette(&bmpjacq, 2, &palette);
+        bmpAddPalette(&bmpjacq_raw, 2, &palette);
+    }
+
+    BMP bmpcam, bmpcam_raw;
+    if (flag & CO_TEST_FLAG_GUID_CAM) {
+        bmpCreate(&bmpcam, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
+        bmpCreate(&bmpcam_raw, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
+        palette.rgbReserved = 0;
+        palette.rgbBlue = 0;
+        palette.rgbGreen = 0;
+        palette.rgbRed = 200;
+        bmpAddPalette(&bmpcam, 1, &palette);
+        bmpAddPalette(&bmpcam_raw, 1, &palette);
+        palette.rgbBlue = 0;
+        palette.rgbGreen = 0;
+        palette.rgbRed = 0;
+        bmpAddPalette(&bmpcam, 2, &palette);
+        bmpAddPalette(&bmpcam_raw, 2, &palette);
+    }
+    unsigned short seloffset[4];
+    actuatorOff(jacqoffset, seloffset, co.machine->niddleNum);
+    unsigned short camoffset[4];
+    actuatorOff(camoffsetdata, camoffset, co.machine->niddleNum);
+    while (1) {
+        int32 r = corunReadLine(&co_run, linenext, linenow, 0);
+        S_CO_RUN_LINE *temp = linenext;
+        linenext = linenow;
+        linenow = temp;
+        if (flag & CO_TEST_FLAG_FUNC) {
+            coActTest(linenow);
+        }
+        uint8 bmpval;
+        for (int i = 0; i < co.machine->niddleNum; i++) {
+            if (flag & CO_TEST_FLAG_JACQ) {
+                uint16 sel = coRunReadJacq(&co_run, linenow, i, 0);
+                if (sel & 0x8000) {
+                    uint8 mask = sel >> 8;
+                    uint8 selval = (uint8)sel;
+                    for (int k = 0; k < 4; k++) {
+                        if (mask & 1 << k) {
+                            bmpval = (selval & 1 << k) ? 2 : 1;
+                            uint16 y = (linenow->iline + (seloffset[k] + i) / co.machine->niddleNum) * 4 + k;
+                            uint16 x = (seloffset[k] + i) % co.machine->niddleNum;
+                            uint16 y1 = linenow->iline * 4 + k;
+                            uint16 x1 = i;
+                            bmpDataSetPix4bit(&bmpjacq, x, y, bmpval);
+                            bmpDataSetPix4bit(&bmpjacq_raw, x1, y1, bmpval);
+                        }
+                    }
+                }
+            }
+            if (flag & (CO_TEST_FLAG_GUID_CAM | CO_TEST_FLAG_GUID_FIGNER)) {
+                if (linenow->flag & LINE_FLAG_SEL_GUID) {
+                    static uint16 valveCode[10];
+                    unsigned short valvenum = corunReadDisfingerCam(&co_run, linenow, i, 0, valveCode, 10);
+                    for (int j = 0; j < valvenum; j++) {
+                        unsigned short vcode = valveCode[j] & ~(1 << 12);
+                        unsigned short inout = valveCode[j] & 1 << 12;
+                        if (vcode == EV39 || vcode == EV40 || vcode == EV41 || vcode == EV42) {
+                            unsigned char feed  = camEv2Feed(vcode);
+                            if (vcode == EV39) {
+                                uint16 y = (linenow->iline + (camoffset[feed] + i) / co.machine->niddleNum) * 4 + feed;
+                                uint16 x = (camoffset[feed] + i) % co.machine->niddleNum;
+                                uint16 y1 = linenow->iline * 4+feed;
+                                uint16 x1 = i;
+                                bmpval = inout ? 1 : 2;
+                                bmpDataSetPix4bit(&bmpcam, x, y, bmpval);
+                                bmpDataSetPix4bit(&bmpcam_raw, x1, y1, bmpval);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        /*********************end***********************/
+        if (r == 0) {
+            if (flag & CO_TEST_FLAG_JACQ) {
+                filePrename(filename, path);
+                wcscat(filename, L"_jacq");
+                wcscat(filename, L".bmp");
+                bmpSave(&bmpjacq, filename);
+                filePrename(filename, path);
+                wcscat(filename, L"_jacq");
+                wcscat(filename, L"_raw");
+                wcscat(filename, L".bmp");
+                bmpSave(&bmpjacq_raw, filename);
+                bmpDeCreate(&bmpjacq);
+                bmpDeCreate(&bmpjacq_raw);
+            }
+            if (flag & CO_TEST_FLAG_GUID_CAM) {
+                filePrename(filename, path);
+                wcscat(filename, L"_cam");
+                wcscat(filename, L".bmp");
+                bmpSave(&bmpcam, filename);
+                filePrename(filename, path);
+                wcscat(filename, L"_cam");
+                wcscat(filename, L"_raw");
+                wcscat(filename, L".bmp");
+                bmpSave(&bmpcam_raw, filename);
+                bmpDeCreate(&bmpcam);
+                bmpDeCreate(&bmpcam_raw);
+            }
+            if (flag & CO_TEST_FLAG_FUNC) {
+                coActTestEnd();
+            }
+            break;
+        }
+    }
+}
 
 
 
