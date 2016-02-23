@@ -605,6 +605,37 @@ bool dmpRegester(DMP_DEV *dev, unsigned int id) {
 }
 
 
+bool dmpDevRecoverId(unsigned int uid) {
+    struct list_head *p;
+    DMP_DEV *d = NULL;
+    unsigned int typeindex;
+    for (int i=0; i < DMP_DEV_HDTYPE_NUM; i++){
+        list_for_each(p,&dmpSys.dev[i].regester){
+            DMP_DEV *dev = list_entry(p,DMP_DEV,list);
+            if (dev->uid == uid) {
+                d = dev;
+                typeindex = i;
+                break;
+            }
+        }
+    }
+    if (d==NULL || !isDevOnline(d) ) {
+        return false;
+    }
+    unsigned int id = d->workid;
+    if (!dmpCanSetId(uid, id, 50)) return false;                //原来为30  出现未等到回码现象后修改为50
+    
+    //call regester hook;
+    ASSERT(typeindex < DMP_DEV_HDTYPE_NUM);
+    void (*reghook)(DMP_DEV *);
+    reghook = reghooks[typeindex];
+    if (reghook != NULL) {
+        reghook(d);
+    }
+    return true;
+}
+
+
 
 void dmpDevSetRegHook(unsigned int devTypeIndex, void (*hook)(DMP_DEV *)) {
     ASSERT(devTypeIndex < DMP_DEV_HDTYPE_NUM);

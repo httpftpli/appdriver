@@ -1,6 +1,6 @@
 
 
-#define QIFA_USE_MAILBOX   0
+#define QIFA_USE_MAILBOX   1
 
 #include "can_wp.h"
 #include "pf_can.h"
@@ -210,8 +210,8 @@ QIFA_SYS qifaSys;
 
 #if QIFA_USE_MAILBOX==1
 
-static void qifa_mailbox_handler(uint32 queueId, uint32 msg) {
-    if (queueId != 0 || msg != 0x55555555) {
+static void qifa_mailbox_handler(uint32 msg) {
+    if (msg != 0x55555555) {
         return;
     }
     qifaProcess();
@@ -372,7 +372,7 @@ bool qifaInit(TCHAR *path) {
     mailboxInit(MODULE_ID_MB);
     uint32 mbaddr = modulelist[MODULE_ID_MB].baseAddr;
     MBenableNewMsgInt(mbaddr, 0, 0);
-    mbRegistHandler(qifa_mailbox_handler);
+    mbRegistHandler(0,qifa_mailbox_handler);
 #endif
     //////////////////////////////////////
     return true;

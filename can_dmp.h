@@ -185,6 +185,7 @@ extern bool dmpAutoRegester(unsigned int devTypeIndex);
 extern uint32 dmpsysListOffline(unsigned int devTypeIndex,DMP_DEV **devbuf, uint32 num);
 extern bool dmpWillRegAuto(unsigned int devTypeIndex);
 extern bool dmpRegester(DMP_DEV *dev, unsigned int id);
+extern bool dmpDevRecoverId(unsigned int uid);
 extern void dmpSysDevCnt(unsigned int devtypeIndex, unsigned int *regedCnt,
                           unsigned int *offlineCnt,unsigned int *newCnt,
                           unsigned int *unknowCnt);
