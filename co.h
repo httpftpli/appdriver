@@ -349,14 +349,14 @@ typedef struct {
 #define CO_RUN_FILENAME(CO_RUN)  ((CO_RUN)->co->filename);
 
 
-typedef struct{
+typedef struct {
     wchar name[50];
     int num;
     int point;
     int numofline;
     uint32 coCheck;
     uint32 dataAvailable;
-    char * data;
+    char *data;
     int cosize;
     int datapointer;
     int ref;
@@ -370,7 +370,7 @@ typedef struct{
 
 
 
-typedef struct{
+typedef struct {
     unsigned int diswidth;
     unsigned int dumy[7];
     unsigned int selInfoAddr;
@@ -381,7 +381,7 @@ typedef struct{
 }DISHEAD;
 
 
-typedef struct{
+typedef struct {
     unsigned int beginNiddle;
     unsigned int endNiddle;
     unsigned int distype;
@@ -397,7 +397,7 @@ typedef struct {
 }JACKHEAD ,GUIDHEAD;
 
 
-typedef struct{
+typedef struct {
     unsigned int isel;
     unsigned int selType;
     unsigned int dummy[2];
@@ -411,7 +411,7 @@ typedef struct{
 }CO_JACPAT;
 
 
-typedef struct{
+typedef struct {
     unsigned int width;
     unsigned int data[1];
 }CO_DIS_DATA;
@@ -463,11 +463,11 @@ typedef struct {
 
 
 typedef struct __S_CO_RUN S_CO_RUN;
-typedef struct __machine_str_tag  MACHINE;
+typedef struct __machine_str_tag MACHINE;
 
 typedef struct {
     wchar filename[100];
-    unsigned char  parsed;
+    unsigned char parsed;
     CO_HEADER head;
     uint32 diameter;
     uint16 niddle;
@@ -528,15 +528,16 @@ typedef struct {
     SIZEMOTOR_ZONE *sizemotor;
     SINKERMOTOR_ZONE *sinkmoterzone_1_3;
     SINKERMOTOR_ZONE *sinkmoterzone_2_4;
+    SINKERMOTOR_ZONE *sinkmoterzone_angle;
 #define FEED_NUM      4
 
 //#define SEL_PRI_PAT      2
 //#define SEL_PRI_SUPPAT   1
 //#define SEL_PRI_SLZ      0
-  #define SEL_PRI_NUM    6
+#define SEL_PRI_NUM    6
     uint8 haveSel;
     uint32 jacsnum[FEED_NUM];
-    SEL_JAC  *jacs[FEED_NUM][SEL_PRI_NUM];
+    SEL_JAC *jacs[FEED_NUM][SEL_PRI_NUM];
     uint32 guidNum;
     SEL_GUID *guid[16];
     //SEL_GUID   *cam[FEED_NUM];
@@ -632,10 +633,10 @@ typedef struct {
     S_CO_RUN *co_run;
 
     int16 istep;                    //当前STEP
-    //int32 nextstep;                //nextstep != istep+1, due to economizer
+                                    //int32 nextstep;                //nextstep != istep+1, due to economizer
 
     int32 iline;                    //实际当前圈数
-    //int32 nextline;                //下一行
+                                    //int32 nextline;                //下一行
 
 
     uint16 prerpm;
@@ -660,16 +661,14 @@ typedef struct {
     uint16 zoneend;
 
     uint32 sizemotor;                 //步进电机值
-    int32 stepSizemotorBase;
-    int32 stepSizemotorAcc;
+
 
     uint32 sinkmotor1_3;               //sinker motor
-    int32 stepSinkermotor1_3Base;
-    int32 stepsinkermotor1_3Acc;
+
 
     uint32 sinkmotor2_4;
-    int32 stepSinkermotor2_4Base;
-    int32 stepsinkermotor2_4Acc;
+
+    uint32 sinkmotor_angle; 
 
     uint32 flag;
 }S_CO_RUN_LINE;
@@ -727,7 +726,7 @@ typedef struct {
     uint16 valveCode;
     const char *nickname;
     bool inout;
-}QIFA_ACT ;
+}QIFA_ACT;
 
 
 //==============================================================================
@@ -735,7 +734,7 @@ typedef struct {
 //================================================================================
 extern void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum);
 extern bool coMd5(const TCHAR *path, void *md5, int md5len);
-extern int32 coParse(const TCHAR *path, S_CO *co,uint32 flag, unsigned int *offset);
+extern int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset);
 extern int32 coSave(S_CO *co, TCHAR *path);
 extern void coRelease(S_CO *co);
 extern void coCreateIndex(S_CO_RUN *co_run, S_CO *co);
@@ -747,29 +746,30 @@ extern uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RU
 extern void corunReset(S_CO_RUN *co_run, S_CO_RUN_LINE *line);
 extern void coRelease(S_CO *co);
 extern uint16 coRunReadJacq(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize);
-extern uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[],uint32 valveNum);
+extern uint32 corunReadDisfingerCam(S_CO_RUN *co_run, S_CO_RUN_LINE *run_line, unsigned int niddle, unsigned int cosize, uint16 valveCode[], uint32 valveNum);
 #define CN_OK  0
 #define CN_READ_ERROR    -1
 #define CN_FILE_ERROR    -2
 extern bool cnCreate(const TCHAR *path, S_CN_GROUP *co, unsigned int num);
 extern int cnParse(const TCHAR *path, S_CN_GROUP *val);
 extern void coRunInitBtsr(S_CO_RUN *co_run, int numofBtsr, int numofpoint, int co_size);
-extern void coRunBtsrBeginStudy(S_CO_RUN *co_run,uint32 line);
-extern void coRunBtsrStudy(S_CO_RUN *co_run,void *buf,int size);
+extern void coRunBtsrBeginStudy(S_CO_RUN *co_run, uint32 line);
+extern void coRunBtsrStudy(S_CO_RUN *co_run, void *buf, int size);
 extern bool coRunBtsrSave(S_CO_RUN *co_run);
-extern bool coRunBtsrData(S_CO_RUN *co_run, int32 iline,void **data,uint32 *datasize);
+extern bool coRunBtsrData(S_CO_RUN *co_run, int32 iline, void **data, uint32 *datasize);
 extern bool coRunIsBtsrDataAvailable(S_CO_RUN *co_run);
 
 
 /******************CO TEST*************************/
 #define CO_TEST_FLAG_FUNC               0x01
-#define CO_TEST_FLAG_JACQ                0x02
+#define CO_TEST_FLAG_JACQ               0x02
 #define CO_TEST_FLAG_GUID_FIGNER        0x04
 #define CO_TEST_FLAG_GUID_CAM           0x08
+#define CO_TEST_FLAG_MOTOR              0x10
 
-extern bool coActTestBegin(const TCHAR *filepath,S_CO_RUN *co);
+extern bool coActTestBegin(const TCHAR *filepath, S_CO_RUN *co);
 extern void coActTest(S_CO_RUN_LINE *line);
 extern void coActTestEnd();
-extern void coTest(TCHAR *path, unsigned int flag) ;
+extern void coTest(TCHAR *path, unsigned int flag);
 
 #endif

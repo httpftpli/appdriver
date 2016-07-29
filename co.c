@@ -17,6 +17,7 @@
 
 
 #define MOTOR_SCALE   1
+#define MOTOR_ACC_SCALE  100
 #define FILEPATH  L"1:\\"
 //#define BTSR_DIS_BUF_SIZE 512*1024
 #define BTSR_DIS_BUF_CNT  6
@@ -392,12 +393,16 @@ static int32 co_read_reset(S_CO *co, uint8 resetpartbuf[], bool checkNiddleNum) 
     if (info->sinkermotor_feed2_4_Addr != 0) {
         readSinkMotor(resetpartbuf + info->sinkermotor_feed2_4_Addr,
                       co->sinkmoterzone_2_4, &co->numofsinkmoterzone_2_4);
+    }else{
+        co->numofsinkmoterzone_2_4 = 0;
     }
 
     //read sinkerangular;
     if (info->sinkerangular_Addr != 0) {
         readSinkMotor(resetpartbuf + info->sinkerangular_Addr,
                       co->sinkangular, &co->numofsinkangular);
+    }else{
+        co->numofsinkangular = 0;
     }
     return 0;
 }
@@ -633,7 +638,7 @@ int32 coParse(const TCHAR *path, S_CO *co, uint32 flag, unsigned int *offset) {
         re = CO_FILE_READ_ERROR;
         goto ERROR;
     }
-    if (co->head.machineName[10]!=0) {
+    if (co->head.machineName[10] != 0) {
         re = CO_FILE_CHECK_ERROR;
         goto ERROR;
     }
@@ -1134,20 +1139,20 @@ static void cocreateindex_econ(S_CO_RUN *co_run, S_CO *co) {
 }
 
 
-static void cocreateindex_sinkmotor(S_CO_RUN *co_run, S_CO *co) {
+
+
+static void cocreateindex_sinkmotor1_3(S_CO_RUN *co_run, S_CO *co) {
     uint32 isinkmotorzone = 0;
     for (int i = 0; i < co->numofstep; i++) {
         S_CO_RUN_STEP *step = co_run->stepptr[i];
         if (co->sinkmoterzone_1_3[isinkmotorzone].head.beginStep <= i
             && co->sinkmoterzone_1_3[isinkmotorzone].head.endStep >= i) {
             step->sinkmoterzone_1_3 = &co->sinkmoterzone_1_3[isinkmotorzone];
-            //step->sinkmoterzone_2_4 = &co->sinkmoterzone_2_4[isinkmotorzone];
             if (co->sinkmoterzone_1_3[isinkmotorzone].head.endStep == i) {
                 isinkmotorzone++;
             }
         } else {
             step->sinkmoterzone_1_3 = NULL;
-            // step->sinkmoterzone_2_4 = NULL;
         }
     }
     //calculate acc
@@ -1158,25 +1163,90 @@ static void cocreateindex_sinkmotor(S_CO_RUN *co_run, S_CO *co) {
         for (int j = 0; j < 8; j++) {
             int32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
             if (linediff != 0) {
-                zone->param[j].acc = (zone->param[j].qf_feed - zone->param[j].qi_feed) / linediff;
+                zone->param[j].acc = MOTOR_ACC_SCALE * (zone->param[j].qf_feed - zone->param[j].qi_feed) / linediff;
             } else {
                 zone->param[j].acc = 0;
             }
         }
     }
-    /*for (int i = 0; i < co->numofsinkmoterzone_2_4; i++) {
+}
+
+
+static void cocreateindex_sinkmotor2_4(S_CO_RUN *co_run, S_CO *co) {
+    uint32 isinkmotorzone = 0;
+    S_CO_RUN_STEP *step;
+    if (co->numofsinkmoterzone_2_4 ==0) {
+        for (int i = 0; i < co->numofstep; i++) {
+            step = co_run->stepptr[i];
+            step->sinkmoterzone_2_4 = NULL;
+        }
+        return;
+    }
+    for (int i = 0; i < co->numofstep; i++) {
+        step = co_run->stepptr[i];
+        if (co->sinkmoterzone_2_4[isinkmotorzone].head.beginStep <= i
+            && co->sinkmoterzone_2_4[isinkmotorzone].head.endStep >= i) {
+            step->sinkmoterzone_2_4 = &co->sinkmoterzone_2_4[isinkmotorzone];
+            if (co->sinkmoterzone_2_4[isinkmotorzone].head.endStep == i) {
+                isinkmotorzone++;
+            }
+        } else {
+            step->sinkmoterzone_2_4 = NULL;
+        }
+    }
+    //calculate acc
+    for (int i = 0; i < co->numofsinkmoterzone_2_4; i++) {
         SINKERMOTOR_ZONE *zone = &co->sinkmoterzone_2_4[i];
         uint32 beginstep = zone->head.beginStep;
         uint32 endstep = zone->head.endStep;
         for (int j = 0; j < 8; j++) {
-            uint32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
+            int32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
             if (linediff != 0) {
-                zone->param[j].acc = (zone->param[j].qf_feed - zone->param[j].qi_feed) / linediff;
+                zone->param[j].acc = MOTOR_ACC_SCALE * (zone->param[j].qf_feed - zone->param[j].qi_feed) / linediff;
             } else {
                 zone->param[j].acc = 0;
             }
         }
-    }*/
+    }
+}
+
+
+static void cocreateindex_sinkmotor_angle(S_CO_RUN *co_run, S_CO *co) {
+    uint32 isinkmotorzone = 0;
+    S_CO_RUN_STEP *step;
+    if (co->numofsinkangular ==0) {
+        for (int i = 0; i < co->numofstep; i++) {
+            step = co_run->stepptr[i];
+            step->sinkmoterzone_angle = NULL;
+        }
+        return;
+    }
+    for (int i = 0; i < co->numofstep; i++) {
+        step = co_run->stepptr[i];
+        if (co->sinkangular[isinkmotorzone].head.beginStep <= i
+            && co->sinkangular[isinkmotorzone].head.endStep >= i) {
+            step->sinkmoterzone_angle = &co->sinkangular[isinkmotorzone];
+            if (co->sinkangular[isinkmotorzone].head.endStep == i) {
+                isinkmotorzone++;
+            }
+        } else {
+            step->sinkmoterzone_angle = NULL;
+        }
+    }
+    //calculate acc
+    for (int i = 0; i < co->numofsinkangular; i++) {
+        SINKERMOTOR_ZONE *zone = &co->sinkangular[i];
+        uint32 beginstep = zone->head.beginStep;
+        uint32 endstep = zone->head.endStep;
+        for (int j = 0; j < 8; j++) {
+            int32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
+            if (linediff != 0) {
+                zone->param[j].acc = MOTOR_ACC_SCALE * (zone->param[j].qf_feed - zone->param[j].qi_feed) / linediff;
+            } else {
+                zone->param[j].acc = 0;
+            }
+        }
+    }
 }
 
 
@@ -1201,7 +1271,7 @@ static void cocreateindex_sizemotor(S_CO_RUN *co_run, S_CO *co) {
         for (int j = 0; j < 8; j++) {
             int32 linediff = co_run->stepptr[endstep]->ilinetag[j] - co_run->stepptr[beginstep]->ilinetag[j];
             if (linediff != 0) {
-                zone->param[j].acc = (zone->param[j].end - zone->param[j].start) / linediff;
+                zone->param[j].acc = MOTOR_ACC_SCALE * (zone->param[j].end - zone->param[j].start) / linediff;
             } else {
                 zone->param[j].acc = 0;
             }
@@ -1299,8 +1369,8 @@ static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
             ASSERT(memerr == MEM_ERR_NONE && guid != NULL);
             co_run->selguid[co_run->selguidnum++] = guid;
             guid->disaddr = ((DISHEAD *)co->dis)->guidInfoAddr
-                             + co_guid->addr
-                             + (int32)co->dis;
+                            + co_guid->addr
+                            + (int32)co->dis;
             guid->co_guid = co_guid;
             guid->ifeed = ifeed % FEED_NUM;
             guid->type = ifeed / FEED_NUM;
@@ -1554,7 +1624,9 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
     //sizemotor;
     cocreateindex_sizemotor(co_run, co);
     //sinkmotor
-    cocreateindex_sinkmotor(co_run, co);
+    cocreateindex_sinkmotor1_3(co_run, co);
+    cocreateindex_sinkmotor2_4(co_run, co);
+    cocreateindex_sinkmotor_angle(co_run, co);
     //func
     cocreateindex_func(co_run, co);
     //fengmen
@@ -1574,9 +1646,9 @@ void coCreateIndex(S_CO_RUN *co_run, S_CO *co) {
 
 static void funcodeParse(struct list_head *func, ACT_GROUP *angleValve, ALARM_GROUP *angleAlarm, uint32 *flag);
 
-static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc) {
-    int32 val = y1 + acc * (x - x1);
-    if ((acc > 0 && val > y2) || (acc < 0 && val < y2)) {
+static int32 mathCalcuLineFunc(int32 y1, int32 y2, int32 x1, int32 x, int32 acc_scaled) {
+    int32 val = y1 + acc_scaled * (x - x1) / MOTOR_ACC_SCALE;
+    if ((acc_scaled > 0 && val > y2) || (acc_scaled < 0 && val < y2)) {
         val = y2;
     }
     return val;
@@ -1664,6 +1736,36 @@ static void corunCalcSinkermotor1_3(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint3
                 line->stepsinkermotor1_3Acc = 0;
             }
         }*/
+    }
+}
+
+
+static void corunCalcSinkermotor2_4(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
+    SINKERMOTOR_ZONE *sinkermotor_zone_2_4 = step->sinkmoterzone_2_4;
+    if (sinkermotor_zone_2_4 != NULL) {
+        uint32 sinkermotorbase = sinkermotor_zone_2_4->param[size].qi_feed;
+        int32 sinkermotoracc = sinkermotor_zone_2_4->param[size].acc;
+        uint32 sinkermotorend = sinkermotor_zone_2_4->param[size].qf_feed;
+        uint32 sinkermotorbaseline = co_run->stepptr[sinkermotor_zone_2_4->head.beginStep]->ilinetag[size];
+        line->sinkmotor2_4 = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
+                                               sinkermotorbaseline, line->iline,
+                                               sinkermotoracc);
+    }
+}
+
+
+static void corunCalcSinkermotor_angle(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
+    S_CO_RUN_STEP *step = co_run->stepptr[line->istep];
+    SINKERMOTOR_ZONE *sinkermotor_zone_angle = step->sinkmoterzone_angle;
+    if (sinkermotor_zone_angle != NULL) {
+        uint32 sinkermotorbase = sinkermotor_zone_angle->param[size].qi_feed;
+        int32 sinkermotoracc = sinkermotor_zone_angle->param[size].acc;
+        uint32 sinkermotorend = sinkermotor_zone_angle->param[size].qf_feed;
+        uint32 sinkermotorbaseline = co_run->stepptr[sinkermotor_zone_angle->head.beginStep]->ilinetag[size];
+        line->sinkmotor_angle = mathCalcuLineFunc(sinkermotorbase, sinkermotorend,
+                                               sinkermotorbaseline, line->iline,
+                                               sinkermotoracc);
     }
 }
 
@@ -1806,7 +1908,9 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *
     corunCalcSinkermotor1_3(co_run, line, size);
 
 //calculate sinker motor_2_4
-/////////////////////////////////////////
+    corunCalcSinkermotor2_4(co_run, line, size);
+//calculate sinker motor_2_4
+   corunCalcSinkermotor_angle(co_run, line, size);
 //dis-finger dis-cam
 //corunReadDisfingerCam(co_run,line,size);
 //welt;
@@ -1946,6 +2050,8 @@ void corunRollStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, uint32 size) {
 
     //calculate sinker motor_1_3
     corunCalcSinkermotor1_3(co_run, line, size);
+    //calculate sinker motor_2_4
+    corunCalcSinkermotor2_4(co_run, line, size);
 }
 
 
@@ -1986,15 +2092,17 @@ uint32 corunReadStep(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE 
     line->rpm = MIN(200, line->rpm);
 
     //calculate sizemotor
-    line->stepSizemotorBase = preline->stepSizemotorBase;
-    line->stepSizemotorAcc = preline->stepSizemotorAcc;
+    //line->stepSizemotorBase = preline->stepSizemotorBase;
+    //line->stepSizemotorAcc = preline->stepSizemotorAcc;
     corunCalcSizemotor(co_run, line, size);
 
     //calculate sinker motor_1_3
-    line->stepSinkermotor1_3Base = preline->stepSinkermotor1_3Base;
-    line->stepsinkermotor1_3Acc = preline->stepsinkermotor1_3Acc;
+    //line->stepSinkermotor1_3Base = preline->stepSinkermotor1_3Base;
+    //line->stepsinkermotor1_3Acc = preline->stepsinkermotor1_3Acc;
     corunCalcSinkermotor1_3(co_run, line, size);
-    //corunCalcSinkermotor1_3(co_run, line, size);
+
+    //calculate sinker motor_2_4
+    corunCalcSinkermotor2_4(co_run, line, size);
 
     //welt;
     line->welt = step->welt;
@@ -2430,13 +2538,15 @@ static uint16 L10L12misc0203code2Valvecode(uint16 codevalue) {
     int16 ivalve;
     int16 re = 0xffff;
     if ((codevalue <= 0x47) || (codevalue >= 0x98 && codevalue <= 0xa9)
-        || (codevalue >= 0xb4 && codevalue <= 0xc3)) {
+        || (codevalue >= 0xb4 && codevalue <= 0xc3) 
+        || (codevalue >= 0x114 && codevalue <= 0x119)) {
         inorout = !(codevalue % 2) << 12;
         ivalve = codevalue >> 1;
         re = inorout | ivalve + VALVE_MIS_BASE;
     }
     return re;
 }
+
 
 static void L10L12_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum) {
     *valnum = 0;
@@ -2678,17 +2788,24 @@ void coActTest(S_CO_RUN_LINE *line) {
     if (line->iline != line->co_run->stepptr[line->istep]->ilinetag[0]) {
         return;
     }
-    sprintf(buf, "\t step:%3d   line:%3d\r\n\r\n", line->istep, line->iline);
-    f_write(&acttestfile, buf, strlen(buf), &wr);
+
+    for (int i = 0; i < 360; i++) {
+        if (line->act[i].num != 0 || line->alarm[i].num != 0){
+            sprintf(buf, "\t step:%3d   line:%3d\r\n", line->istep, line->iline);
+            f_write(&acttestfile, buf, strlen(buf), &wr);
+            break;
+        }
+    }
+    
     QIFA_ACT act;
     for (int i = 0; i < 360; i++) {
         if (line->act[i].num == 0 && line->alarm[i].num == 0) continue;
-        sprintf(buf, "\t\t\t angle %3d, act num %d,alarm num %d:", i, line->act[i].num, line->alarm[i].num);
+        sprintf(buf, "\t\t\t angle %3d, ActNum %d,AlarmNum %d:", i, line->act[i].num, line->alarm[i].num);
         f_write(&acttestfile, buf, strlen(buf), &wr);
         for (int j = 0; j < line->act[i].num; j++) {
             actcode2Act(line->act[i].valvecode[j], &act);
-            const char *inoutchar = act.inout ? "in" : "out";
-            sprintf(buf, "\t%s %04x %s", act.nickname, act.valveCode, inoutchar);
+            const char *inoutchar = act.inout ? "(i)" : "(o)";
+            sprintf(buf, "\t%s%s %04x ", act.nickname, inoutchar, act.valveCode);
             f_write(&acttestfile, buf, strlen(buf), &wr);
         }
         for (int j = 0; j < line->alarm[i].num; j++) {
@@ -2697,6 +2814,42 @@ void coActTest(S_CO_RUN_LINE *line) {
         }
         sprintf(buf, "\r\n");
         f_write(&acttestfile, buf, strlen(buf), &wr);
+    }
+}
+
+
+
+void coMotorTest(const TCHAR *filepath, S_CO_RUN_LINE *line) {
+    static FIL file;
+    static unsigned int linecnt;
+    S_CO_RUN *run = line->co_run;
+    char filename[30], buf[150];
+    //FRESULT r;
+    static bool re = false;
+    if (line->iline == 0) {
+        if (f_open(&file, filepath, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
+            wtrToStr(filename, run->co->filename);
+            sprintf(buf, "co filename:%s %d steps %d lines\r\n", filename, run->numofstep, run->numofline[0]);
+            uint32 wr;
+            f_write(&file, buf, strlen(buf), &wr);
+            sprintf(buf, "step\t line\t speed\t size\t sinker13\t sinker24\t sinkerangle\r\n");
+            f_write(&file, buf, strlen(buf), &wr);
+            linecnt = 0;
+            re = true;
+        }
+    }
+    ASSERT(linecnt == line->iline);
+    linecnt++;
+    if (re != true) {
+        return;
+    }
+    sprintf(buf, "%d\t %d\t %d\t %d\t %d\t %d\t %d\t\r\n", line->istep, line->iline, line->rpm,
+                                 line->sizemotor, line->sinkmotor1_3,line->sinkmotor2_4,line->sinkmotor_angle);
+    unsigned int wr;
+    f_write(&file, buf, strlen(buf), &wr);
+    if (line->iline == run->numofline[0] - 1) {
+        f_close(&file);
+        re = false;
     }
 }
 
@@ -2721,7 +2874,7 @@ const unsigned short jacqoffset[25] = {
 };
 
 
-static void  actuatorOff(const unsigned short feed2OffData[25], unsigned short off[4], unsigned int niddleNnm) {
+static void actuatorOff(const unsigned short feed2OffData[25], unsigned short off[4], unsigned int niddleNnm) {
     ASSERT(niddleNnm >= 208 && niddleNnm <= 592 && niddleNnm % 16 == 0);
     unsigned int index = (niddleNnm - 208) / 16;
     ASSERT(feed2OffData[index] != 0);
@@ -2732,18 +2885,18 @@ static void  actuatorOff(const unsigned short feed2OffData[25], unsigned short o
 }
 
 
-static unsigned int camEv2Feed(unsigned short ev){
-   ASSERT(ev == EV39 || ev == EV40 || ev == EV41 || ev == EV42);
-   if(ev==EV39){
-      return 0;
-   } else if(ev== EV40){
-       return 1;
-   }else if(ev== EV41){
-       return 2;
-   }else if(ev==EV42){
-      return 3;
-   }
-   return 0;
+static unsigned int camEv2Feed(unsigned short ev) {
+    ASSERT(ev == EV39 || ev == EV40 || ev == EV41 || ev == EV42);
+    if (ev == EV39) {
+        return 0;
+    } else if (ev == EV40) {
+        return 1;
+    } else if (ev == EV41) {
+        return 2;
+    } else if (ev == EV42) {
+        return 3;
+    }
+    return 0;
 }
 
 
@@ -2765,11 +2918,13 @@ void coTest(TCHAR *path, unsigned int flag) {
     corunReset(&co_run, linenow);
     if (flag & CO_TEST_FLAG_FUNC) {
         wcscpy(filename, path);
-        fileFixNameReplace(filename, L".txt");
+        filePrename(filename, path);
+        wcscat(filename, L"_fun.txt");
         coActTestBegin(filename, &co_run);
     }
     BMP bmpjacq, bmpjacq_raw, bmpfinger;
     RGBQUAD palette;
+    unsigned short seloffset[4];
     if (flag & CO_TEST_FLAG_JACQ) {
         bmpCreate(&bmpjacq, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
         bmpCreate(&bmpjacq_raw, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
@@ -2784,9 +2939,10 @@ void coTest(TCHAR *path, unsigned int flag) {
         palette.rgbRed = 0;
         bmpAddPalette(&bmpjacq, 2, &palette);
         bmpAddPalette(&bmpjacq_raw, 2, &palette);
+        actuatorOff(jacqoffset, seloffset, co.machine->niddleNum);
     }
-
     BMP bmpcam, bmpcam_raw;
+    unsigned short camoffset[4];
     if (flag & CO_TEST_FLAG_GUID_CAM) {
         bmpCreate(&bmpcam, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
         bmpCreate(&bmpcam_raw, 4, co.machine->niddleNum, (co_run.numofline[0] + 2) * 4);
@@ -2801,11 +2957,9 @@ void coTest(TCHAR *path, unsigned int flag) {
         palette.rgbRed = 0;
         bmpAddPalette(&bmpcam, 2, &palette);
         bmpAddPalette(&bmpcam_raw, 2, &palette);
+        actuatorOff(camoffsetdata, camoffset, co.machine->niddleNum);
     }
-    unsigned short seloffset[4];
-    actuatorOff(jacqoffset, seloffset, co.machine->niddleNum);
-    unsigned short camoffset[4];
-    actuatorOff(camoffsetdata, camoffset, co.machine->niddleNum);
+
     while (1) {
         int32 r = corunReadLine(&co_run, linenext, linenow, 0);
         S_CO_RUN_LINE *temp = linenext;
@@ -2813,6 +2967,12 @@ void coTest(TCHAR *path, unsigned int flag) {
         linenow = temp;
         if (flag & CO_TEST_FLAG_FUNC) {
             coActTest(linenow);
+        }
+        if (flag & CO_TEST_FLAG_MOTOR) {
+            filePrename(filename, path);
+            wcscat(filename, L"_motor");
+            wcscat(filename, L".txt");
+            coMotorTest(filename, linenow);
         }
         uint8 bmpval;
         for (int i = 0; i < co.machine->niddleNum; i++) {
@@ -2842,11 +3002,11 @@ void coTest(TCHAR *path, unsigned int flag) {
                         unsigned short vcode = valveCode[j] & ~(1 << 12);
                         unsigned short inout = valveCode[j] & 1 << 12;
                         if (vcode == EV39 || vcode == EV40 || vcode == EV41 || vcode == EV42) {
-                            unsigned char feed  = camEv2Feed(vcode);
+                            unsigned char feed = camEv2Feed(vcode);
                             if (vcode == EV39) {
                                 uint16 y = (linenow->iline + (camoffset[feed] + i) / co.machine->niddleNum) * 4 + feed;
                                 uint16 x = (camoffset[feed] + i) % co.machine->niddleNum;
-                                uint16 y1 = linenow->iline * 4+feed;
+                                uint16 y1 = linenow->iline * 4 + feed;
                                 uint16 x1 = i;
                                 bmpval = inout ? 1 : 2;
                                 bmpDataSetPix4bit(&bmpcam, x, y, bmpval);

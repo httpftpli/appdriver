@@ -1,6 +1,6 @@
 
 
-#define QIFA_USE_MAILBOX   1
+#define QIFA_USE_MAILBOX   0
 
 #include "can_wp.h"
 #include "pf_can.h"
@@ -15,6 +15,8 @@
 #include "ff.h"
 #include "mem.h"
 #include "misc.h"
+#include "machine_cfg.h"
+#include <stdlib.h>
 
 #if QIFA_USE_MAILBOX==1
     #include "pf_mailbox.h"
@@ -220,14 +222,6 @@ static void qifa_mailbox_handler(uint32 msg) {
 #endif
 
 
-typedef struct {
-    unsigned int numofQifa;
-    unsigned int numofBoard;
-    unsigned int numPerBoard;
-    unsigned int qifaOffset;
-    unsigned int sizeofQifa;
-    unsigned int qifanameOffset;
-}QF_HEAD;
 
 
 
@@ -248,6 +242,9 @@ typedef struct {
 
 
 #define QIFA_FLAG    0xaa55
+#define QIFA_FLAG_EN    0xaa55
+#define QIFA_FLAG_DIS   0x55aa
+
 
 
 static OS_MEM qifamem;
@@ -281,54 +278,77 @@ static bool __qifainit(QIFA_SYS *qifasys,TCHAR *path) {
     FIL file;
     uint32 rb;
     //int nameoffset;
-    QF_HEAD head;
-    QF_PACKED qifapack;
+    MD5_CTX md5;
+    MACHI_CFG_FILE_HEAD filehead;
+    MACHI_CFG_HEAD *head;
+    QF_PACKED *qifapack;
+    unsigned char *p, *data=NULL,*dataend;
+    unsigned char md5hash[16];
     if (f_open(&file, path, FA_READ) != FR_OK) {
         return false;
     }
-    f_lseek(&file, 0x80);
-    if (f_read(&file, &head, sizeof head,&rb) != FR_OK || rb != sizeof head) {
+    if (f_read(&file, &filehead, sizeof filehead,&rb) != FR_OK || rb != sizeof filehead) {
         goto ERROR;
     }
-    if (sizeof qifapack > head.sizeofQifa) {
-        goto ERROR;
-    }
-    qifasys->numofboard = head.numofBoard;
-    qifasys->numperboard = head.numPerBoard;
-    qifasys->numofqifa = head.numofQifa;
+    if (strcmp(filehead.cfghead, "swjcfg") != 0) goto ERROR;
 
-    if (f_lseek(&file, head.qifanameOffset) != FR_OK) {
+    if (f_lseek(&file, 0x80) != FR_OK) goto ERROR;
+    data = (unsigned char *)malloc(f_size(&file) - 0x80);
+    if (data == NULL) {
         goto ERROR;
     }
-    if (f_read(&file, __qifaname, sizeof __qifaname,&rb) != FR_OK) {
+    dataend = data + f_size(&file) - 0x80;
+    unsigned int rd;
+    if(f_read(&file,data,f_size(&file) - 0x80,&rd)!=FR_OK || rd != f_size(&file)-0x80){
         goto ERROR;
     }
-    f_lseek(&file, head.qifaOffset);
+    MD5Init(&md5);
+    MD5Update(&md5, data, f_size(&file) - 0x80);
+    MD5Final(&md5, md5hash);
+    if (memcmp(&md5hash, &filehead.md5,16 ) != 0) goto ERROR;
+
+    p = data;
+    head = (MACHI_CFG_HEAD *)p;
+    if (sizeof qifapack > head->sizeofQifa) {
+        goto ERROR;
+    }
+    qifasys->numofboard = head->numofBoard;
+    qifasys->numperboard = head->numPerBoard;
+    qifasys->numofqifa = head->numofQifa;
+    ASSERT(qifasys->numofboard<=lenthof(qifasys->QiFa_Reg_Table));
+    ASSERT(qifasys->numperboard<=lenthof(qifasys->QiFa_Reg_Table[0]));
+
+    p += head->qifanameOffset-0x80;
+    ASSERT(p<=dataend);
+    memcpy(__qifaname,p,head->qifanamesize);
+    p = data + head->qifaOffset-0x80;
+
     for (int i = 0; i < qifasys->numofqifa; i++) {
-        if (f_read(&file, &qifapack, sizeof qifapack,&rb) != FR_OK ||
-            sizeof qifapack != rb) {
+        qifapack = (QF_PACKED *)p;
+        p += sizeof(QF_PACKED);
+        if (qifapack->flag != QIFA_FLAG_EN || qifapack->flag != QIFA_FLAG_DIS) {
             goto ERROR;
         }
-        if (qifapack.flag != QIFA_FLAG) {
-            goto ERROR;
+        if (qifapack->flag == QIFA_FLAG_DIS) {
+            continue;
         }
-        QIFA *qifa = MemGet(&qifamem,&mem_err);
+        QIFA *qifa = MemGet(&qifamem, &mem_err);
         ASSERT(mem_err==MEM_ERR_NONE);
-        uint16 qfid = qifapack.qfId;
-        qifa->board_id = qifapack.board_id;
-        qifa->xuhao = qifapack.xuhao;
-        qifa->nc_no = qifapack.default_nc_no;
-        qifa->default_nc_no = qifapack.default_nc_no;
-        qifa->nc_no_changeable = qifapack.nc_no_changeable;
-        qifa->nc_no_display = qifapack.nc_no_dis;
-        qifa->cam_en = qifapack.iscam;
+        uint16 qfid = qifapack->qfId;
+        qifa->board_id = qifapack->board_id;
+        qifa->xuhao = qifapack->xuhao;
+        qifa->nc_no = qifapack->default_nc_no;
+        qifa->default_nc_no = qifapack->default_nc_no;
+        qifa->nc_no_changeable = qifapack->nc_no_changeable;
+        qifa->nc_no_display = qifapack->nc_no_dis;
+        qifa->cam_en = qifapack->iscam;
         qifa->flag = QIFA_FLAG;
         qifa->qfid = qfid;
         for (int j=0;j<13;j++) {
-            if (qifapack.qifa_name_offset[j]!=-1UL) {
-                qifa->name[j] = &__qifaname[qifapack.qifa_name_offset[j] / 2];
+            if (qifapack->qifa_name_offset[j]!=-1UL) {
+                qifa->name[j] = &__qifaname[qifapack->qifa_name_offset[j] / 2];
             }else{
-                qifa->name[j] = &__qifaname[qifapack.qifa_name_offset[0] / 2];
+                qifa->name[j] = &__qifaname[qifapack->qifa_name_offset[0] / 2];
             }
         }
         char nicknamebuf[100];
@@ -340,9 +360,15 @@ static bool __qifainit(QIFA_SYS *qifasys,TCHAR *path) {
         qifasys->QiFa_Reg[qfid] = qifa;
     }
     f_close(&file);
+    if (data!=NULL) {
+        free(data);
+    }
     return true;
     ERROR:
     f_close(&file);
+    if (data!=NULL) {
+        free(data);
+    }
     return false;
 }
 
@@ -375,6 +401,7 @@ bool qifaInit(TCHAR *path) {
     mbRegistHandler(0,qifa_mailbox_handler);
 #endif
     //////////////////////////////////////
+
     return true;
 }
 
@@ -439,44 +466,53 @@ void qifaSetIo(uint32 wpId, uint32 iqifa, uint32 val) {
 
 
 int32 qifaRead(QIFA * qifa, bool comm) {
+    if (qifa==NULL) {
+        return 0;
+    }
     ASSERT(qifa->flag == QIFA_FLAG);
     return qifa->inout;
 }
 
+
 int32 qifaRead1(uint32 wpId, uint32 iqifa, bool comm) {
     ASSERT(wpId > 0 && wpId <= qifaSys.numofboard);
-    return qifaSys.QiFa_Reg_Table[wpId - 1][iqifa]->inout;
+    QIFA *qifa = qifaSys.QiFa_Reg_Table[wpId - 1][iqifa];
+    if (qifa==NULL) {
+        return 0;
+    }
+    return qifa->inout;
 }
+
 
 uint32 qifaRead2(uint32 wpId, bool comm) {
     uint32 val = 0;
     ASSERT(wpId > 0 && wpId <= qifaSys.numperboard);
     for (int i = 0; i < qifaSys.numperboard; i++) {
-        val |= qifaSys.QiFa_Reg_Table[wpId - 1][i]->inout << i;
+        val |= (!!qifaRead1(wpId,1,0)) << i;
     }
     return val;
 }
 
 
 int32 qifaReadIo(QIFA * qifa, bool comm) {
-    ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
+    if (qifa==NULL) {
+        return 0;
+    }
+    ASSERT(qifa->flag == QIFA_FLAG);
     return(!!qifa->inout) ^ (!!qifa->nc_no);
 }
 
 int32 qifaReadIo1(uint32 wpId, uint32 iqifa, bool comm) {
     ASSERT(wpId > 0 && wpId <= qifaSys.numofboard);
     QIFA *qifa = qifaSys.QiFa_Reg_Table[wpId - 1][iqifa];
-    if (qifa==NULL) {
-        return 0;
-    }
     return qifaReadIo(qifa, comm);
 }
 
 uint32 qifaReadIo2(uint32 wpId, bool comm) {
     uint32 val = 0;
-    ASSERT(wpId > 0 && wpId <= qifaSys.numperboard);
+    ASSERT(wpId > 0 && wpId <= qifaSys.numofboard);
     for (int i = 0; i < qifaSys.numperboard; i++) {
-        val |= qifaReadIo1(wpId, i, comm) << i;
+        val |= (!!qifaReadIo1(wpId, i, comm)) << i;
     }
     return val;
 }
@@ -522,7 +558,7 @@ void qifaRestore2(uint32 wpId) {
     }
 }
 
-#define QIFA_BOARD_NUM        10
+#define QIFA_BOARD_NUM_MAX        20
 
 
 #define QIFA_GUILEI_BUF_LEN  200
@@ -532,8 +568,9 @@ typedef struct {
 }Qifa_Guilei;
 
 
+
 void qifaProcess() {
-    static Qifa_Guilei qifaguilei[QIFA_BOARD_NUM];
+    static Qifa_Guilei qifaguilei[QIFA_BOARD_NUM_MAX];
     QIFA_VAL qifaval;
     QIFA *qifa;
     int val;
@@ -544,17 +581,17 @@ void qifaProcess() {
         qifa = qifaval.qifa;
         ASSERT(qifa!=NULL && qifa->flag == QIFA_FLAG);
         val = qifa->inout = qifaval.val;
-        qifaguilei[qifa->board_id].data_value[qifaguilei[qifa->board_id].num]
+        unsigned int id = qifa->board_id;
+        ASSERT(id < qifaSys.numofboard);
+        qifaguilei[id].data_value[qifaguilei[id].num]
         = (uint8)((val ^ !!qifa->nc_no) << 7 | qifa->xuhao);
-        qifaguilei[qifa->board_id].num++;
-        if (qifaguilei[qifa->board_id].num >= QIFA_GUILEI_BUF_LEN) {
-            //todo warning
-            break;
-        }
+        qifaguilei[id].num++;
+        ASSERT(qifaguilei[id].num < QIFA_GUILEI_BUF_LEN);
     }
+    int32 j;
     for (int i = 0; i < qifaSys.numofboard; i++) {
         if (qifaguilei[i].num != 0) {
-            int32 j = 0;
+            j = 0;
             do {
                 uint32 datanum = MIN(qifaguilei[i].num, 8);
                 wpQfWrite(i + 1, &qifaguilei[i].data_value[j], datanum);

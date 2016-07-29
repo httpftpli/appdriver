@@ -16,6 +16,13 @@
 #include "atomic.h"
 #include "algorithm.h"
 #include "debug.h"
+#include "machine_cfg.h"
+#include <wchar.h>
+
+
+
+#define   DMP_USE_CAN0
+#define   DMP_USE_CAN1
 
 
 #define DMPDEV_INAND_SECTOR  USER_SECTOR+10
@@ -40,9 +47,51 @@
 
 
 extern mmcsdCtrlInfo mmcsdctr[2];
-DMP_SYSTEM dmpSys = { .num = { 1, 2, 8, 1, 1 },};
+DMP_SYSTEM dmpSys;
 
-void (*reghooks[DMP_DEV_HDTYPE_NUM])(DMP_DEV *dev);
+void (*reghooks[DEV_TYPE_MAX_NUM])(DMP_DEV *dev);
+
+
+unsigned int dmpdevtype2index(unsigned int type) {
+    /*switch (type) {
+    case DMP_DEV_HDTYPE_SBJ:
+        index = 0;
+        break;
+    case DMP_DEV_HDTYPE_SSR:
+        index = 1;
+        break;
+    case DMP_DEV_HDTYPE_SSC:
+        index = 2;
+        break;
+    case DMP_DEV_HDTYPE_SSF:
+        index = 3;
+        break;
+    case DMP_DEV_HDTYPE_SHB:
+        index = 4;
+        break;
+    default:
+        break;
+    }*/
+    for (int i = 0; i < dmpSys.typeNum; i++) {
+        if (dmpSys.dev[i].param->typeFlag == type) {
+            return dmpSys.dev[i].param->typeIndex;
+        }
+    }
+    return -1UL;
+}
+
+
+
+static unsigned int dmpindex2devtype(unsigned int index) {
+    ASSERT(index < dmpSys.typeNum);
+    return dmpSys.dev[index].param->typeFlag;
+}
+
+
+static DMP_DEV_GROUP* devtype2devgroup(unsigned int type) {
+    unsigned int index = dmpdevtype2index(type);
+    return &dmpSys.dev[index];
+}
 
 
 
@@ -188,14 +237,14 @@ static LIST_HEAD(devlisthead);
 static LIST_HEAD(devlistheadfree);
 static LIST_HEAD(heartbeatlist);
 static void initDevList() {
-    static DMP_DEV devpool[40];
+    static DMP_DEV devpool[100];
     memset(devpool, 0, sizeof(devpool));
     for (int i = 0; i < lenthof(devpool); i++) {
         list_add_tail(&devpool[i].list, &devlistheadfree);
     }
 }
 
-void praseDevList(CAN_DMP *frame, struct list_head *devlist) {
+void praseDevList(unsigned int canModule, CAN_DMP *frame, struct list_head *devlist) {
     char *buf;
     struct list_head *literal;
     DMP_DEV devxx;
@@ -214,6 +263,7 @@ void praseDevList(CAN_DMP *frame, struct list_head *devlist) {
             strncpy(&(dev->desc[ipack * 6]), buf, 6);
             dev->ipacket++;
             if (dev->ipacket == packnum) {
+                dev->canChannel = canModule;
                 bool r = praseDev(dev->desc, dev);
                 dev->stat = r ? DMP_DEV_PRASE_FINISH : DMP_DEV_PRASE_ERROR;
             }
@@ -221,14 +271,20 @@ void praseDevList(CAN_DMP *frame, struct list_head *devlist) {
         }
     }
     if (literal == devlist) {
-        DMP_DEV *dev = list_first_entry(&devlistheadfree, DMP_DEV, list);
+        DMP_DEV *dev = list_first_entry_or_null(&devlistheadfree, DMP_DEV, list);
+        ASSERT(dev != NULL);
+        CPUirqd();
         list_del(&dev->list);
+        CPUirqe();
         dev->uid = frame->uid;
         dev->ipacket = 1;
         strncpy(&(dev->desc[0]), buf, 6);
+        CPUirqd();
         list_add_tail(&dev->list, devlist);
+        CPUirqe();
     }
 }
+
 
 static void dmpDevDataClear(DMP_DEV *dev) {
     struct list_head list;
@@ -243,7 +299,7 @@ static bool dmpdefaultheartbeart(DMP_DEV *dev);
 void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
     struct list_head *literal,*literal1,*n,*n1;
     //compare to regester list
-    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+    for (int i = 0; i < dmpSys.typeNum; i++) {
         list_for_each_safe(literal, n, &sys->dev[i].regester) {
             DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
             list_for_each_safe(literal1, n1, devlist) {
@@ -253,14 +309,16 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
                         dmpDevDataClear(devs);
                         list_move_tail(&devs->list, &devlistheadfree);
                     } else {
-                        if (devs->inboot == 0 & dmpCanSetId(devs->uid, dev->workid, 100)) {
+                        if (devs->inboot == 0 & dmpCanSetId(devs->canChannel, devs->uid, dev->workid, 100)) {
                             devs->stat |= DMP_DEV_DEV_ONLINE;
                             devs->workid = dev->workid;
+                            devs->param = sys->dev[i].param;
                             //call regester hooks
-                            int typeindex = dmpdevtype2index(devs->hdtype);
-                            ASSERT(typeindex < DMP_DEV_HDTYPE_NUM);
+                            //int typeindex = dmpdevtype2index(devs->hdtype);
+                            //(typeindex < DEV_TYPE_MAX_NUM);
                             void (*reghook)(DMP_DEV *dev);
-                            reghook = reghooks[typeindex];
+                            //reghook = reghooks[typeindex];
+                            reghook = reghooks[i];
                             if (reghook != NULL) {
                                 reghook(devs);
                             }
@@ -294,6 +352,7 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
                 }
                 if (literal1 == &sys->dev[index].newadd) {
                     list_move_tail(literal, &sys->dev[index].newadd);
+                    dev->param = sys->dev[index].param;
                 }
             } else {
                 list_for_each_safe(literal1, n1, &sys->dev[index].unknow) {
@@ -304,6 +363,7 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
                 }
                 if (literal1 == &sys->dev[index].unknow) {
                     list_move_tail(literal, &sys->dev[index].unknow);
+                    dev->param = sys->dev[index].param;
                 }
             }
 
@@ -373,9 +433,35 @@ void dmpSysDevCnt(unsigned int devtypeIndex, unsigned int *regedCnt, unsigned in
 }
 
 
+
+unsigned int dmpSysTypeCnt(void) {
+    return dmpSys.typeNum;
+}
+
+
+unsigned int dmpSysDevCntRequire(unsigned int devtypeIndex) {
+    ASSERT(devtypeIndex < DEV_TYPE_MAX_NUM);
+    DMP_DEVGP_PARAM *param = dmpSys.dev[devtypeIndex].param;
+    if (param) {
+        return param->devNum;
+    }
+    return 0;
+}
+
+
+const wchar* dmpSysTypeName(unsigned int devtypeIndex) {
+    ASSERT(devtypeIndex < DEV_TYPE_MAX_NUM);
+    DMP_DEVGP_PARAM *param = dmpSys.dev[devtypeIndex].param;
+    if (param) {
+        return param->name;
+    }
+    return NULL;
+}
+
+
 unsigned int dmpSysWillRegCnt(unsigned int typeindex, uint32 *flag) {
     unsigned int regCnt = listCnt(&dmpSys.dev[typeindex].regester);
-    unsigned int num = dmpSys.num[typeindex];
+    unsigned int num = dmpSys.dev[typeindex].param->devNum;
     if (flag != NULL) {
         *flag = (1 << num) - 1;
         struct list_head *literal;
@@ -421,7 +507,7 @@ bool dmpHaveOffline(unsigned int devTypeIndex) {
             fg_offline = true;
         }
     } else {
-        for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+        for (int i = 0; i < dmpSys.typeNum; i++) {
             dmpSysDevCnt(i, &reg, &offline, &newadd, &unknow);
             if (offline > 0) {
                 fg_offline = true;
@@ -470,9 +556,9 @@ bool dmpSysSave() {
     unsigned int *magic = (unsigned int *)buf;
     DMP_UID_ID *uid_id = (DMP_UID_ID *)(buf + 8);
     struct list_head *literal;
-    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+    for (int i = 0; i < dmpSys.typeNum; i++) {
         list_for_each(literal, &dmpSys.dev[i].regester) {
-            DMP_DEV *dev = list_entry(literal, DMP_DEV, list); ;
+            DMP_DEV *dev = list_entry(literal, DMP_DEV, list);;
             uid_id[*num].uid = dev->uid;
             uid_id[*num].id = dev->workid;
             uid_id[*num].hdtype = dev->hdtype;
@@ -531,7 +617,7 @@ bool dmpAutoPreRegester(unsigned int devTypeIndex, unsigned int *id, DMP_DEV **n
     devr = dmpsys_find_offline(devType);
     devn = list_first_entry(&dmpSys.dev[devTypeIndex].newadd, DMP_DEV, list);
     *newadddev = devn;
-    bool r = dmpCanPreSetId(devn->uid, true, 10);
+    bool r = dmpCanPreSetId(devn->canChannel, devn->uid, true, 10);
     if (r == false) {
         return r;
     }
@@ -562,31 +648,31 @@ bool dmpAutoRegester(unsigned int devTypeIndex) {
 DMP_DEV* dmpPreRegester1(unsigned int devTypeIndex, bool val) {
     if (!dmpHaveNewAdd(devTypeIndex)) return NULL;
     DMP_DEV *dev = list_first_entry(&dmpSys.dev[devTypeIndex].newadd, DMP_DEV, list);
-    if (!dmpCanPreSetId(dev->uid, val, 20)) return NULL;        //10
+    if (!dmpCanPreSetId(dev->canChannel, dev->uid, val, 20)) return NULL;        //10
     return dev;
 }
 
 
 
 bool dmpPreRegester2(DMP_DEV *dev, bool val) {
-    if (!dmpCanPreSetId(dev->uid, val, 20)) return false;       //10
+    if (!dmpCanPreSetId(dev->canChannel, dev->uid, val, 20)) return false;       //10
     return true;
 }
 
 
 
-
 bool dmpRegester(DMP_DEV *dev, unsigned int id) {
     unsigned int uid = dev->uid;
-    if (!dmpCanSetId(uid, id, 50)) return false;                //原来为30  出现未等到回码现象后修改为50
+    if (!dmpCanSetId(dev->canChannel, uid, id, 50)) return false;                //原来为30  出现未等到回码现象后修改为50
     dev->workid = id;
     list_del(&dev->list);
     list_sort_insert(&dev->list, &devtype2devgroup(dev->hdtype)->regester, candmpsort);
     //list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->regester);
     dev->stat |= DMP_DEV_DEV_ONLINE;
     //call regester hook;
-    int typeindex = dmpdevtype2index(dev->hdtype);
-    ASSERT(typeindex < DMP_DEV_HDTYPE_NUM);
+    //int typeindex = dmpdevtype2index(dev->hdtype);
+    int typeindex = dev->param->typeIndex;
+    ASSERT(typeindex < DEV_TYPE_MAX_NUM);
     void (*reghook)(DMP_DEV *dev);
     reghook = reghooks[typeindex];
     if (reghook != NULL) {
@@ -605,28 +691,28 @@ bool dmpRegester(DMP_DEV *dev, unsigned int id) {
 }
 
 
-bool dmpDevRecoverId(unsigned int uid) {
+bool dmpDevRecoverId(DMP_DEV *dev) {
     struct list_head *p;
     DMP_DEV *d = NULL;
     unsigned int typeindex;
-    for (int i=0; i < DMP_DEV_HDTYPE_NUM; i++){
-        list_for_each(p,&dmpSys.dev[i].regester){
-            DMP_DEV *dev = list_entry(p,DMP_DEV,list);
-            if (dev->uid == uid) {
-                d = dev;
+    for (int i = 0; i < dmpSys.typeNum; i++) {
+        list_for_each(p, &dmpSys.dev[i].regester) {
+            DMP_DEV *dev1 = list_entry(p, DMP_DEV, list);
+            if (dev1->uid == dev->uid) {
+                d = dev1;
                 typeindex = i;
                 break;
             }
         }
     }
-    if (d==NULL || !isDevOnline(d) ) {
+    if (d == NULL || !isDevOnline(d)) {
         return false;
     }
     unsigned int id = d->workid;
-    if (!dmpCanSetId(uid, id, 50)) return false;                //原来为30  出现未等到回码现象后修改为50
-    
+    if (!dmpCanSetId(d->canChannel, d->uid, id, 50)) return false;                //原来为30  出现未等到回码现象后修改为50
+
     //call regester hook;
-    ASSERT(typeindex < DMP_DEV_HDTYPE_NUM);
+    ASSERT(typeindex < DEV_TYPE_MAX_NUM);
     void (*reghook)(DMP_DEV *);
     reghook = reghooks[typeindex];
     if (reghook != NULL) {
@@ -638,7 +724,7 @@ bool dmpDevRecoverId(unsigned int uid) {
 
 
 void dmpDevSetRegHook(unsigned int devTypeIndex, void (*hook)(DMP_DEV *)) {
-    ASSERT(devTypeIndex < DMP_DEV_HDTYPE_NUM);
+    ASSERT(devTypeIndex < DEV_TYPE_MAX_NUM);
     reghooks[devTypeIndex] = hook;
 }
 
@@ -656,8 +742,8 @@ bool dmpUnRegester1(unsigned int devTypeIndex, unsigned int workId) {
         return false;
     }
     if (dev->stat & DMP_DEV_DEV_ONLINE) {
-        if (!dmpCanPreSetId(dev->uid, 1, 10)) return false;
-        if (!dmpCanSetId(dev->uid, 0, 50)) return false;
+        if (!dmpCanPreSetId(dev->canChannel, dev->uid, 1, 10)) return false;
+        if (!dmpCanSetId(dev->canChannel, dev->uid, 0, 50)) return false;
         list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->newadd);
     } else {
         dmpDevDataClear(dev);
@@ -696,7 +782,7 @@ int32 wpDevHeartbeatEn(DMP_DEV *dev, bool en, bool (*heartbeart)(DMP_DEV *dev), 
         dev->heartBeat(dev);
     }*/
     int timespan;
-    int r = timespan = wpCanHeartbeatEn(id, en, timeoutms);
+    int r = timespan = wpCanHeartbeatEn(dev->canChannel, id, en, timeoutms);
     if (timespan == -1) {
         timespan = 0;
     }
@@ -712,17 +798,117 @@ int32 wpDevHeartbeatEn(DMP_DEV *dev, bool en, bool (*heartbeart)(DMP_DEV *dev), 
 
 
 
-void dmpInit() {
+
+static DMP_DEVGP_PARAM devgp_param[DEV_TYPE_MAX_NUM];
+
+
+
+
+typedef struct {
+    unsigned short magic;
+    unsigned short dummy;
+    unsigned int typeflag;
+    unsigned int typeIndex;
+    unsigned int num;
+    unsigned int pad[16];
+    wchar name[20];
+}DEV_TYPE_PARAM;
+
+
+
+bool dmpInit(const TCHAR *path) {
     //init dmpSys dmpSysSave
-    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+    for (int i = 0; i < DEV_TYPE_MAX_NUM; i++) {
         INIT_LIST_HEAD(&dmpSys.dev[i].regester);
         INIT_LIST_HEAD(&dmpSys.dev[i].newadd);
         INIT_LIST_HEAD(&dmpSys.dev[i].unknow);
+        devgp_param[i].magic = 0;
     }
     INIT_LIST_HEAD(&dmpSys.unknow);
     INIT_LIST_HEAD(&dmpSys.heartbeartreturnlist);
     initDevList();
+
+    dmpSys.typeNum = 0;
+    for (int i = 0; i < lenthof(devgp_param); i++) {
+        devgp_param[i].magic = 0;
+        devgp_param[i].devNum = 0;
+    }
+
+    FIL file;
+    uint32 rb;
+    //int nameoffset;
+    MACHI_CFG_FILE_HEAD filehead;
+
+    MD5_CTX md5;
+    unsigned char md5hash[16];
+    unsigned char *data = NULL, *p;
+
+    if (f_open(&file, path, FA_READ) != FR_OK) {
+        return false;
+    }
+    if (f_read(&file, &filehead, sizeof filehead,&rb) != FR_OK || rb != sizeof filehead) {
+        goto ERROR;
+    }
+    if (strcmp(filehead.cfghead, "swjcfg") != 0) goto ERROR;
+
+    if (f_lseek(&file, 0x80) != FR_OK) goto ERROR;
+    data = (unsigned char *)malloc(f_size(&file) - 0x80);
+    if (data == NULL) {
+        goto ERROR;
+    }
+    unsigned int rd;
+    if (f_read(&file, data, f_size(&file) - 0x80, &rd) != FR_OK || rd != f_size(&file) - 0x80) {
+        goto ERROR;
+    }
+    MD5Init(&md5);
+    MD5Update(&md5, data, f_size(&file) - 0x80);
+    MD5Final(&md5, md5hash);
+    if (memcmp(&md5hash, &filehead.md5, 16) != 0) goto ERROR;
+
+    p = data;
+
+    MACHI_CFG_HEAD *head;
+    head = (MACHI_CFG_HEAD *)p;
+
+    ASSERT(head->numofDevtype <= lenthof(devgp_param));
+    p += head->devtypeoffset - 0x80;
+    ASSERT(p <= data + f_size(&file) - 0x80);
+    if (sizeof(DEV_TYPE_PARAM) != head->sizeofDevtype) goto ERROR;
+
+    DEV_TYPE_PARAM *dev_type_param;
+    for (int i = 0; i < head->numofDevtype; i++) {
+        dev_type_param = (DEV_TYPE_PARAM *)p;
+        p += sizeof(DEV_TYPE_PARAM);
+        ASSERT(p <= data + f_size(&file) - 0x80);
+        if (dev_type_param->magic != 0xaa55) continue;
+        unsigned int index = dev_type_param->typeIndex;
+        ASSERT(index < DEV_TYPE_MAX_NUM);
+        devgp_param[index].devNum = dev_type_param->num;
+        devgp_param[index].typeFlag = dev_type_param->typeflag;
+        devgp_param[index].typeIndex = index;
+        devgp_param[index].magic = 0xaaaa5555;
+        wcsncpy(devgp_param[index].name, dev_type_param->name, sizeof(devgp_param[index].name) / 2 - 1);
+        dmpSys.dev[index].param = &devgp_param[index];
+        dmpSys.typeNum++;
+    }
+
+    for (int i = 0; i < dmpSys.typeNum; i++) {
+        if (devgp_param[i].magic != 0xaaaa5555) {
+            goto ERROR;
+        }
+    }
+    f_close(&file);
+    if (data != NULL) {
+        free(data);
+    }
     dmpSysStore();
+    return true;
+    ERROR:
+    f_close(&file);
+    if (data != NULL) {
+        free(data);
+    }
+    return false;
 }
 
 
@@ -734,7 +920,7 @@ static bool dmpdefaultheartbeart(DMP_DEV *dev) {
     heartbeart_id = frame.desid = dev->workid;
     frame.dlc = 0;
     atomicClear(&heartbeatflag);
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(dev->canChannel, (CAN_FRAME *)&frame);
     withintimedo(HEARTBEAT_RETURN_TIMEOUT) {
         if (atomicTestClear(&heartbeatflag)) {
             return true;
@@ -744,6 +930,12 @@ static bool dmpdefaultheartbeart(DMP_DEV *dev) {
 }
 
 
+static bool dmpsysheartbeatenflag = false;
+
+void dmpSysHeartbeatEn(bool en) {
+    dmpsysheartbeatenflag = en;
+}
+
 
 
 
@@ -751,7 +943,10 @@ DMP_DEV* dmpSysHeartbeat() {
     NOT_IN_IRQ();
     struct list_head *p;
     DMP_DEV *dev;
-    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+    if (!dmpsysheartbeatenflag) {
+        return NULL;
+    }
+    for (int i = 0; i < dmpSys.typeNum; i++) {
         list_for_each(p, &dmpSys.dev[i].regester) {
             dev = list_entry(p, DMP_DEV, list);
             if (!isDevOnline(dev) || dev->timespan == 0) continue;
@@ -777,9 +972,9 @@ bool dmpDevHeartbeatEx(unsigned short workId) {
     NOT_IN_IRQ();
     unsigned int type = CAN_WP_GET_TYPE(workId);
     struct list_head *p;
-    list_for_each(p,&dmpSys.dev[type-1].regester){
-        DMP_DEV *dev = list_entry(p,DMP_DEV,list);
-        if (dev->workid==workId && dev->heartBeat) {
+    list_for_each(p, &dmpSys.dev[type - 2].regester) {
+        DMP_DEV *dev = list_entry(p, DMP_DEV, list);
+        if (dev->workid == workId && dev->heartBeat) {
             return dev->heartBeat(dev);
         }
     }
@@ -795,7 +990,7 @@ bool dmpCheckDev() {
         dmpDevDataClear(dev);
         list_move(&dev->list, &devlistheadfree);
     }
-    for (int i = 0; i < DMP_DEV_HDTYPE_NUM; i++) {
+    for (int i = 0; i < dmpSys.typeNum; i++) {
         list_for_each_safe(literal, n, &dmpSys.dev[i].newadd) {
             DMP_DEV *dev = list_entry(literal, DMP_DEV, list);
             dmpDevDataClear(dev);
@@ -807,8 +1002,13 @@ bool dmpCheckDev() {
             list_move(&dev->list, &devlistheadfree);
         }
     }
-    dmpCanRdDevVer(0xffffffff);
-    delay(100);
+#ifdef DMP_USE_CAN0
+    dmpCanRdDevVer(MODULE_ID_DCAN0, 0xffffffff);
+#endif
+#ifdef DMP_USE_CAN1
+    dmpCanRdDevVer(MODULE_ID_DCAN1, 0xffffffff);
+#endif
+    delay(150);
     dmpCategDevice(&dmpSys, &devlisthead);
     return true;
 }
@@ -822,7 +1022,13 @@ void dmpIapHelper(DMP_IAP_HELPER *helper, uint32 num) {
         dmpDevDataClear(dev);
         list_move(p, &devlistheadfree);
     }
-    dmpCanRdDevVer(0xffffffff);
+
+#ifdef DMP_USE_CAN0
+    dmpCanRdDevVer(MODULE_ID_DCAN0, 0xffffffff);
+#endif
+#ifdef DMP_USE_CAN1
+    dmpCanRdDevVer(MODULE_ID_DCAN1, 0xffffffff);
+#endif
     delay(100);
     uint32 typeindex;
     for (int i = 0; i < num; i++) {
@@ -843,25 +1049,30 @@ void dmpIapHelper(DMP_IAP_HELPER *helper, uint32 num) {
     }
     for (int i = 0; i < num; i++) {
         for (int j = 0; j < helper[i].num; j++) {
-            dmpCanReadId(helper[i].devs[j].uid, &helper[i].devs[j].workid, 10);
+            dmpCanReadId(helper[i].devs[j].canChannel, helper[i].devs[j].uid, &helper[i].devs[j].workid, 10);
         }
     }
 }
 
-void dmpCanRdDevVer(unsigned int devUid) {
+
+void dmpCanRdDevVer(unsigned int can, unsigned int uid) {
     DEFINE_CAN_DMP_FRAME(frame);
-    frame.uid = devUid;
+    frame.uid = uid;
     frame.dlc = 1;
     frame.data[0] = DMP_FUNCODE_READVER;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
 }
 
-bool dmpCanPreSetId(unsigned int devUid, bool val, unsigned int timeout) {
+
+
+
+
+bool dmpCanPreSetId(unsigned int can, unsigned int devUid, bool val, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 2;
     frame.data[0] = (unsigned char)DMP_FUNCODE_PRESETID | (!!val) << 8;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&presetidflag);
     withintimedo(timeout) {
         if (atomicTestClear(&presetidflag)) {
@@ -872,12 +1083,12 @@ bool dmpCanPreSetId(unsigned int devUid, bool val, unsigned int timeout) {
 }
 
 
-bool dmpCanReadId(unsigned int devUid, unsigned short *id, unsigned int timeoutms) {
+bool dmpCanReadId(unsigned int can, unsigned int devUid, unsigned short *id, unsigned int timeoutms) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 1;
     frame.data[0] = (unsigned char)DMP_FUNCODE_READID;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&readidflag);
     withintimedo(timeoutms) {
         if (atomicTestClear(&readidflag)) {
@@ -891,13 +1102,13 @@ bool dmpCanReadId(unsigned int devUid, unsigned short *id, unsigned int timeoutm
 
 
 
-bool dmpCanSetId(unsigned int devUid, unsigned short id, unsigned int timeout) {
+bool dmpCanSetId(unsigned int can, unsigned int devUid, unsigned short id, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 3;
     frame.data[0] = (unsigned char)DMP_FUNCODE_SETID | id << 8;
     atomicClear(&setidflag);
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     withintimedo(timeout) {
         if (atomicTestClear(&setidflag)) {
             return true;
@@ -908,12 +1119,12 @@ bool dmpCanSetId(unsigned int devUid, unsigned short id, unsigned int timeout) {
 
 
 //#########################################################################
-bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout) {
+bool dmpCanJumpToBoot(unsigned int can, unsigned int devUid, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 1;
     frame.data[0] = DMP_FUNCODE_JUMPBOOT;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&jumptobootflag);
     withintimedo(timeout) {
         if (atomicTestClear(&jumptobootflag)) {
@@ -923,12 +1134,12 @@ bool dmpCanJumpToBoot(unsigned int devUid, unsigned int timeout) {
     return false;
 }
 
-bool dmpCanJumpToApp(unsigned int devUid, unsigned int timeout) {
+bool dmpCanJumpToApp(unsigned int can, unsigned int devUid, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 1;
     frame.data[0] = DMP_FUNCODE_JUMPAPP;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&jumptoappflag);
     withintimedo(timeout) {
         if (atomicTestClear(&jumptoappflag)) {
@@ -937,14 +1148,14 @@ bool dmpCanJumpToApp(unsigned int devUid, unsigned int timeout) {
     }
     return false;
 }
-bool dmpCanBootEraseApp(unsigned int devUid, unsigned int max_baohao, unsigned int timeout) {
+bool dmpCanBootEraseApp(unsigned int can, unsigned int devUid, unsigned int max_baohao, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 4;
     //frame.data[0] = DMP_FUNCODE_ERASEAPP;
     frame.data[0] = (unsigned char)DMP_FUNCODE_ERASEAPP |
                     (unsigned int)(max_baohao & 0xffffff) << 8;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&eraseappflag);
     withintimedo(timeout) {
         if (atomicTestClear(&eraseappflag)) {
@@ -953,14 +1164,14 @@ bool dmpCanBootEraseApp(unsigned int devUid, unsigned int max_baohao, unsigned i
     }
     return false;
 }
-bool dmpCanProgramDate(unsigned int devUid, unsigned int baohao, unsigned char count, unsigned char *val, unsigned int timeout) {
+bool dmpCanProgramDate(unsigned int can, unsigned int devUid, unsigned int baohao, unsigned char count, unsigned char *val, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 4 + count;
     frame.data[0] = (unsigned char)DMP_FUNCODE_ProgramDate |
                     (unsigned int)(baohao & 0xffffff) << 8;
     memcpy(&frame.data[1], val, count);
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&programdataflag);
     withintimedo(timeout) {
         if (atomicTestClear(&programdataflag)) {
@@ -970,12 +1181,12 @@ bool dmpCanProgramDate(unsigned int devUid, unsigned int baohao, unsigned char c
     return false;
 }
 
-bool dmpCanProgramEnd(unsigned int devUid, unsigned int timeout) {
+bool dmpCanProgramEnd(unsigned int can, unsigned int devUid, unsigned int timeout) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = devUid;
     frame.dlc = 1;
     frame.data[0] = DMP_FUNCODE_ProgramEnd;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&programendflag);
     withintimedo(timeout) {
         if (atomicTestClear(&programendflag)) {
@@ -987,14 +1198,14 @@ bool dmpCanProgramEnd(unsigned int devUid, unsigned int timeout) {
 
 
 
-int32 wpCanHeartbeatEn(unsigned int id, bool en, unsigned int timeoutms) {
+int32 wpCanHeartbeatEn(unsigned int can, unsigned int id, bool en, unsigned int timeoutms) {
     DEFINE_CAN_WP_FRAME(frame);
     frame.desid = id;
     frame.dlc = 1;
     frame.data[0] = !!en;
     frame.funcode = (unsigned char)CAN_WP_FUNCODE_HEARDBEATEN;
     heartbeart_en_id = id;
-    CANSend_noblock(MODULE_ID_DCAN0, (CAN_FRAME *)&frame);
+    CANSend_noblock(can, (CAN_FRAME *)&frame);
     atomicClear(&heartbeatenflag);
     withintimedo(timeoutms) {
         if (atomicTestClear(&heartbeatenflag)) {
@@ -1028,12 +1239,12 @@ bool wpHeartBeartCanRcv(CAN_WP *frame) {
 
 
 
-bool dmpCanRcv(CAN_DMP *frame) {
+bool dmpCanRcv(unsigned int canModule, CAN_DMP *frame) {
     if (!isDmpFrameRcv(frame)) return false;
     unsigned char funcode = (unsigned char)(frame->data[0] & 0xff);
     switch (funcode) {
     case DMP_FUNCODE_READVER:
-        praseDevList(frame, &devlisthead);
+        praseDevList(canModule, frame, &devlisthead);
         break;
     case DMP_FUNCODE_SETID:
         atomicSet(&setidflag);

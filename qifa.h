@@ -43,8 +43,8 @@ typedef struct{
 
 typedef struct {
     QIFA *QiFa_Reg[0x400];
-    QIFA *QiFa_Reg_Table[10][16];
-    QIFA_BOARD *board[10];
+    QIFA *QiFa_Reg_Table[30][16];
+    QIFA_BOARD *board[30];
     uint32 numofqifa;
     uint32 numofboard;
     uint32 numperboard;
