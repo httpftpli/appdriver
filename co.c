@@ -89,15 +89,22 @@ static void L10L12_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *v
 static void L10L12_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                                    uint16 *alarmcode, uint32 *alarmnum);
 static void L10L12_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+static void L10L12_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
 
 
 static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum);
 static void L04E7_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                                   uint16 *alarmcode, uint32 *alarmnum);
 static void L04E7_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
-
-static void L10L12_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
 static void L04E7_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
+
+
+static void L500_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum);
+static void L500_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                                  uint16 *alarmcode, uint32 *alarmnum);
+static void L500_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
+static void L500_0309camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num);
+
 
 
 
@@ -151,13 +158,22 @@ void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum) {
         machine.funcode2Alarm = L10L12_funcode2Alarm;
         machine.niddleNumCheck = false;
         machine.funCamResolve = L10L12_camcode2Valvecode;
+        machine.fun0309CamResolve = NULL;
     } else if (strcmp(machinename, "L04E7") == 0) {
         machine.fun0203Resolve = L04E7_fun0203Resolve;
         machine.fun031eToValvecode = L04E7_031eToValvecode;
         machine.funcode2Alarm = L04E7_funcode2Alarm;
         machine.niddleNumCheck = true;
         machine.funCamResolve = L04E7_camcode2Valvecode;
-    } else {
+        machine.fun0309CamResolve = NULL;
+    } else if (strcmp(machinename, "L500") ==0){
+        machine.fun0203Resolve = L500_fun0203Resolve;
+        machine.fun031eToValvecode = L500_031eToValvecode;
+        machine.funcode2Alarm = L500_funcode2Alarm;
+        machine.niddleNumCheck = true;
+        machine.funCamResolve = L04E7_camcode2Valvecode;
+        machine.fun0309CamResolve = L500_0309camcode2Valvecode;
+    }else{
         while (1);
     }
 }
@@ -2407,6 +2423,14 @@ static uint16 L04E7_hafuzhencode2Valvecode(uint16 funcval) {
 }
 
 
+static uint16 L500_hafuzhencode2Valvecode(uint16 funcval) {
+    funcval -= 0x0d;
+    uint32 valvecode = !(funcval & 0x01ul) << 12;
+    valvecode |= HAFUZHEN_BASE + (funcval >> 1);
+    return valvecode;
+}
+
+
 static uint16 common0506func2Valvecode(uint16 funcval) {
     return COMM_FUNC_BASE + funcval | 1 << 12;
 }
@@ -2522,6 +2546,63 @@ static void L10L12_camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) 
 }
 
 
+
+
+static void L500_0309camcode2Valvecode(FUNC *fun, uint16 *valvecode, uint32 *num) {
+    //M CAM
+#define M_CAM_POS   3
+    static uint16 caminoutmap[4][3] = { //[feed][ace]
+      { 0, 326, 146 }, { 0, 56, 236}, { 0, 146, 326} , { 0, 236, 56},
+    };
+
+    bool in = false;
+    uint32 pos_ace = fun->value % 3;
+    uint32 feed = fun->value / 3;
+    if (feed==2) {
+        feed = 3;
+    }else if(feed == 3){
+        feed = 2;
+    }
+
+    *num = 0;
+    if (caminoutmap[feed][pos_ace] == fun->angular) {
+        in = true;
+    }
+    switch (pos_ace) {
+    case 0: //A
+        if (in == false) {
+            valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + M_CAM_POS * 2 + 1; //quan out
+            valvecode[1] = CAM_BASE + feed * CAM_LINE_NUMBER + M_CAM_POS * 2 + 0; //ban out
+            *num = 2;
+        } else {
+            //TODO GUIDE
+        }
+        break;
+    case 1: //C
+        if (in == true) {
+            valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + M_CAM_POS * 2 + 0; //ban in
+            *num = 1;
+        } else {
+            valvecode[0] = CAM_BASE + feed * CAM_LINE_NUMBER + M_CAM_POS * 2 + 1; //quan out
+            *num = 1;
+        }
+        break;
+    case 2: //E
+        if (in == true) {
+            //ban in,quan in
+            valvecode[0] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + M_CAM_POS * 2 + 0; //ban in
+            valvecode[1] = 1 << 12 | CAM_BASE + feed * CAM_LINE_NUMBER + M_CAM_POS * 2 + 1; //quan in
+            *num = 2;
+        } else {
+            //TODO GUIDE
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+
 static uint16 L10L12_yarnfinger2Valvecode(uint16 funcval) {
     uint16 valvecode;
     uint32 finger, feed;
@@ -2590,6 +2671,40 @@ static uint16 L04E7_misc0203code2Valvecode(uint16 codevalue) {
 }
 
 
+static uint16 L500_misc0203code2Valvecode(uint16 codevalue) {
+    static uint16 mis0203funmap[150] = {
+        //0
+        [0] = EV5, [1] = EV17, [2] = EV22, [3] = EV34, [4] = EV35,
+        [5] = EV36, [6] = EV38, [7] = EV39, [8] = EV40, [9] = EV41,
+        [10] = EV42, [11] = EV43, [12] = EV50, [13] = EV51, [14] = EV52,
+        [15] = EV53, [16] = EV54, [17] = EV56, [18] = EV58, [19] = EV59,
+        [20] = EV60, [21] = EV67, [22] = EV68, 
+        //EV86 IN  = 0X34
+        [26] = EV86, [27] = EV87, [28] = EV89, [29] = EV90, [30] = EV91,
+        //EV70 IN = 0X98
+        [76] = EV70,[77] = EV79, [78] = EV80, [79] = EV81,[80] = EV82, [81] = EV85, [82] = EV88,
+        //EV84 IN = 0XA8
+        [84] = EV101, [85] = EV102, 
+        [86] = EV103, [87] = EV104,
+        //EV107 IN = 0XB4
+        [90] = EV107,[91] = EV108, [92] = EV109,[93] = EV110,[94] = EV111,
+        [95] = EV112,[96] = EV113, [97] = EV114,
+        //EV146 IN = 0X10E
+        [135] = EV146,[136] = EV147,
+        //EV160 IN = 0X11A
+        [141] = EV160,[142] = EV161,
+    };
+
+    int16 inorout;
+    int16 ivalve;
+    int16 re = 0xffff;
+    ivalve = codevalue >> 1;
+    inorout = !(codevalue % 2) << 12;
+    re = inorout | mis0203funmap[ivalve];
+    return re;
+}
+
+
 static uint16 L04E7_yarnfinger2Valvecode(uint16 funcval) {
     uint16 valvecode = !(funcval % 2) << 12; //in:1<<12  out:0<<12
     funcval = (funcval - 0x4a) / 2;
@@ -2602,6 +2717,44 @@ static uint16 L04E7_yarnfinger2Valvecode(uint16 funcval) {
     return valvecode;
 }
 
+static uint16 L500_yarnfinger2Valvecode(uint16 funcval) {
+    static uint16 selcode1[] = {
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,0x08, 0x09,
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,0x18, 0x19,
+        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,0x28, 0x29,
+        0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,0x38, 0x39,
+    };
+    static uint16 selcode2[] = { 
+        0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 
+        0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 
+        0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 
+        0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 
+        0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 
+         
+    };
+     static uint16 selcode3[40] = { 
+        0x0f,
+        0x1f,
+        0x2f, 
+        0x3f,
+    };
+    uint16 valvecode = !(funcval % 2) << 12; //in:1<<12  out:0<<12
+    uint16 *selcode; 
+    if (funcval>=0x48 &&funcval<=0x97) {
+        funcval = (funcval - 0x48) / 2;
+        selcode = selcode1; 
+    }else if(funcval>=0xd4 &&funcval<=0xfb) {
+        funcval = (funcval - 0xd4) / 2;
+        selcode = selcode2;
+    }else if(funcval>=0x106 &&funcval<=0x10d) {
+        funcval = (funcval - 0x106) / 2;
+        selcode = selcode3;
+    }    
+    
+    valvecode |= YARN_FINGER_BASE + selcode[funcval];
+    return valvecode;
+}
+
 
 static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum) {
     uint16 valvecode_t;
@@ -2609,6 +2762,20 @@ static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *va
         valvecode_t = L04E7_yarnfinger2Valvecode(codevalue);
     } else {
         valvecode_t = L04E7_misc0203code2Valvecode(codevalue);
+    }
+    *valvecode = valvecode_t;
+    *valnum = 1;
+}
+
+
+static void L500_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *valnum) {
+    uint16 valvecode_t;
+    if ((codevalue >= 0x48 && codevalue <= 0x97) ||
+        (codevalue >= 0xd4 && codevalue <= 0xfb) ||
+        (codevalue >= 0x106 && codevalue <= 0x10d)) {
+        valvecode_t = L500_yarnfinger2Valvecode(codevalue);
+    } else {
+        valvecode_t = L500_misc0203code2Valvecode(codevalue);
     }
     *valvecode = valvecode_t;
     *valnum = 1;
@@ -2671,6 +2838,26 @@ static void L04E7_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum)
 }
 
 
+
+static void L500_funcode2Alarm(FUNC *func, uint16 *alarmcode, uint32 *alarmnum) {
+    if (func->funcode == 0x031e) {
+        switch (func->value) {
+        case 0x01:
+            alarmcode[*alarmnum] = COMMON_FUNCODE_8_CODE;
+            (*alarmnum)++;
+            break;
+        default:
+            break;
+        }
+    } else if (func->funcode == 0x0303) { //fun 12
+        if (func->value == 0x11) {
+            alarmcode[*alarmnum] = COMMON_FUNCODE_12_2d_CODE;
+            (*alarmnum)++;
+        }
+    }
+}
+
+
 void L10L12_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
                             uint16 *alarmcode, uint32 *alarmnum) {
     if (fun->value < 0x0d) {
@@ -2697,6 +2884,18 @@ void L04E7_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
         alarmcode += *alarmnum;
     } else if (fun->value >= 0x02 && fun->value <= 0x09) { //hafu zhen sanjiao
         *valvecode = L04E7_hafuzhencode2Valvecode(fun->value);
+        *valnum = 1;
+    }
+}
+
+
+void L500_031eToValvecode(FUNC *fun, uint16 *valvecode, uint32 *valnum,
+                           uint16 *alarmcode, uint32 *alarmnum) {
+    if (fun->value == 0x01) {
+        L500_funcode2Alarm(fun, alarmcode, alarmnum);
+        alarmcode += *alarmnum;
+    } else if (fun->value >= 0x0d && fun->value <= 0x14) { //hafu zhen sanjiao
+        *valvecode = L500_hafuzhencode2Valvecode(fun->value);
         *valnum = 1;
     }
 }
@@ -2748,6 +2947,10 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
     case 0x011f:
         fun010fcode2Valvecode(fun->value, valvecode, valnum);
         break;
+    case 0x0309:
+        if (machine.fun0309CamResolve) {
+            machine.fun0309CamResolve(fun,  valvecode, valnum);
+        }
     default:
         break;
     }
@@ -2832,7 +3035,7 @@ void coMotorTest(const TCHAR *filepath, S_CO_RUN_LINE *line) {
             sprintf(buf, "co filename:%s %d steps %d lines\r\n", filename, run->numofstep, run->numofline[0]);
             uint32 wr;
             f_write(&file, buf, strlen(buf), &wr);
-            sprintf(buf, "step\t line\t speed\t size\t sinker13\t sinker24\t sinkerangle\r\n");
+            sprintf(buf, "step\t line\t speed\t size\t sk13\t sk24\t skAng\r\n");
             f_write(&file, buf, strlen(buf), &wr);
             linecnt = 0;
             re = true;
@@ -2961,7 +3164,7 @@ void coTest(TCHAR *path, unsigned int flag) {
     }
 
     while (1) {
-        int32 r = corunReadLine(&co_run, linenext, linenow, 0);
+        int32 r = corunReadLine(&co_run, linenext, linenow, 0);        
         S_CO_RUN_LINE *temp = linenext;
         linenext = linenow;
         linenow = temp;

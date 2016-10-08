@@ -107,6 +107,7 @@ typedef struct dmp_dev_help_ {
 
 
 typedef struct dmp_system_ {
+    unsigned char cfgmd5[16];
     unsigned int typeNum;
     DMP_DEV_GROUP dev[DEV_TYPE_MAX_NUM];
     struct list_head unknow;
@@ -153,12 +154,13 @@ extern int CanDmp_Return;
 
 
 extern unsigned int dmpdevtype2index(unsigned int type);
-extern bool dmpInit(const TCHAR *path);
+extern void dmpInit();
+extern bool dmpLoadCfg(const TCHAR *path);
 extern bool dmpAutoPreRegester(unsigned int devTypeIndex, unsigned int *id, DMP_DEV **newadddev);
 extern void praseDevList(unsigned int canModule,CAN_DMP *frame, struct list_head *devlist);
 extern void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist);
 extern void dmpIapHelper(DMP_IAP_HELPER *helper, uint32 num);
-extern void dmpSysStore();
+extern int dmpSysStore();
 extern bool dmpCheckDev();
 extern bool dmpSysSave();
 extern bool dmpAutoRegester(unsigned int devTypeIndex);

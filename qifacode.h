@@ -220,8 +220,12 @@
 #define EV81    0X1EF//NUd                 //0x0f
 #define EV82    0X1F0//NUd                 //0x00
 #define EV85    0X1F1//119//0x0200         //0x01
+#define EV88    0X1F2                 //
 #define EV96    0X1F3//NUd                 //0x03
 #define EV101   0X1F4//NUd                 //0x04
+#define EV102   0X1F5
+#define EV103   0X1F6
+#define EV104   0X1F7
 #define EV107   0X1FA//120//0x201          //0x0a
 #define EV108   0X1FB//NUd                 //0x0b
 #define EV109   0X1FC//NUd                 //0x0c
@@ -239,6 +243,8 @@
 #define dasongmoto3 0X220//NUd             //0x00
 #define dasongmoto4 0X221//NUd             //0x01
 
+#define EV146   0X228//NUd                 //0x0a
+#define EV147   0X229//NUd                 //0x0a
 #define EV148   0X22A//NUd                 //0x0a
 #define EV160   0X22B//121//0x202          //0x0b
 #define EV161   0X22C//122//0x203          //0x0c

@@ -24,14 +24,14 @@
 #define   DMP_USE_CAN0
 #define   DMP_USE_CAN1
 
+#define  DMP_SAVE_FILENAME  L"1:/dmpreg.dat"
 
-#define DMPDEV_INAND_SECTOR  USER_SECTOR+10
 
 
 #define DMP_FUNCODE_READVER        0x01
-#define DMP_FUNCODE_READID         	0x02
-#define DMP_FUNCODE_PRESETID        0xfa
-#define DMP_FUNCODE_SETID           0xfd
+#define DMP_FUNCODE_READID         0x02
+#define DMP_FUNCODE_PRESETID       0xfa
+#define DMP_FUNCODE_SETID          0xfd
 //#define DMP_FUNCODE_BURNAPP         0xf7
 
 
@@ -306,8 +306,23 @@ void dmpCategDevice(DMP_SYSTEM *sys, struct list_head *devlist) {
                 DMP_DEV *devs = list_entry(literal1, DMP_DEV, list);
                 if ((devs->stat == DMP_DEV_PRASE_FINISH) && (devs->uid == dev->uid) && (devs->hdtype == dmpindex2devtype(i))) {
                     if (isDevOnline(dev)) { //if old dev online ,don't replace
-                        dmpDevDataClear(devs);
-                        list_move_tail(&devs->list, &devlistheadfree);
+                        unsigned short wid_tmp = 0;
+                        if (dmpCanReadId(dev->canChannel, dev->uid, &wid_tmp, 100) == false) { //dev offline
+                            dev->stat &= ~DMP_DEV_DEV_ONLINE;
+                            dmpDevDataClear(devs);
+                            list_move_tail(&devs->list, &devlistheadfree);
+                        } else if (wid_tmp == 0) { //dev have offlined  previously
+                            if (!dmpCanSetId(dev->canChannel, dev->uid, dev->workid, 100)) {
+                                dev->stat &= ~DMP_DEV_DEV_ONLINE;
+                                dmpDevDataClear(devs);
+                                list_move_tail(&devs->list, &devlistheadfree);
+                            }
+                        } else if (wid_tmp == dev->workid) { //online ,delete scaned dev
+                            dmpDevDataClear(devs);
+                            list_move_tail(&devs->list, &devlistheadfree);
+                        } else {
+                            while (1);
+                        }
                     } else {
                         if (devs->inboot == 0 & dmpCanSetId(devs->canChannel, devs->uid, dev->workid, 100)) {
                             devs->stat |= DMP_DEV_DEV_ONLINE;
@@ -549,12 +564,17 @@ bool dmpWillUnReg(unsigned int devTypeIndex) {
     return false;
 }
 
+
+
 bool dmpSysSave() {
     unsigned char buf[512];
     memset(buf, 0, sizeof buf);
-    unsigned int *num = (unsigned int *)(buf + 4);
     unsigned int *magic = (unsigned int *)buf;
-    DMP_UID_ID *uid_id = (DMP_UID_ID *)(buf + 8);
+    unsigned char *cfgmd5 = (buf + 4);
+    unsigned int *num = (unsigned int *)(buf + 20);
+    memcpy(cfgmd5, dmpSys.cfgmd5, 16);
+    unsigned int len = 24;
+    DMP_UID_ID *uid_id = (DMP_UID_ID *)(buf + 24);
     struct list_head *literal;
     for (int i = 0; i < dmpSys.typeNum; i++) {
         list_for_each(literal, &dmpSys.dev[i].regester) {
@@ -563,21 +583,78 @@ bool dmpSysSave() {
             uid_id[*num].id = dev->workid;
             uid_id[*num].hdtype = dev->hdtype;
             (*num)++;
+            len += sizeof(DMP_UID_ID);
+            ASSERT(len <= sizeof buf);
         }
     }
     *magic = 0x5555aaaa;
-    return MMCSDP_Write(mmcsdctr, buf, DMPDEV_INAND_SECTOR, 1);
+    unsigned int *crc = (unsigned int *)(buf + len);
+    *crc = calculate_crc32_bzip2((char *)buf, len);
+    len += 4;
+    FIL f;
+    if (f_open(&f, DMP_SAVE_FILENAME, FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS) != FR_OK) {
+        return false;
+    }
+    unsigned int bw;
+    if (f_write(&f, buf, len, &bw) != FR_OK || len != bw) {
+        f_close(&f);
+        return false;
+    }
+    f_close(&f);
+    return true;
 }
 
 
 
-void dmpSysStore() {
-    unsigned char buf[512];
-    MMCSDP_Read(mmcsdctr, buf, DMPDEV_INAND_SECTOR, 1);
-    unsigned int *magic = (unsigned int *)buf;
-    unsigned int *num = (unsigned int *)(buf + 4);
-    DMP_UID_ID *uid_id = (DMP_UID_ID *)(buf + 8);
-    if (*magic != 0x5555aaaa) return;
+
+#define DMP_CFG_FILE_FORMAT_ERR     -1
+#define DMP_CFG_FILE_NOT_MATCH      -2
+#define DMP_CFG_FILE_ACCESS_ERR     -3
+#define DMP_CFG_FILE_NONE           -4
+#define DMP_CFG_FILE_OK              1
+#define DMP_CFG_MEM_ERR             -5
+
+int dmpSysStore() {
+    int re;
+    char *buf = NULL;
+    FIL f;
+    unsigned int *magic;
+    unsigned char *md5cfg;
+    unsigned int *num;
+    DMP_UID_ID *uid_id;
+    unsigned int crc ;
+    if (f_open(&f, DMP_SAVE_FILENAME, FA_READ) != FR_OK) {
+        return DMP_CFG_FILE_NONE;
+    }
+    unsigned int size = f_size(&f);
+    unsigned int br;
+    buf = (char *)malloc(size);
+    if (!buf) {
+        re = DMP_CFG_MEM_ERR;
+        goto ERROR;
+    }
+    if (f_read(&f, buf, size, &br) != FR_OK || br != size) {
+        re = DMP_CFG_FILE_ACCESS_ERR;
+        goto ERROR;
+    }
+    crc = calculate_crc32_bzip2(buf, size - 4);
+    if (crc != *(unsigned int *)(buf + size - 4)) {
+        re = DMP_CFG_FILE_FORMAT_ERR;
+        goto ERROR;
+    }
+    magic = (unsigned int *)buf;
+    md5cfg = (unsigned char *)buf + 4;
+    num = (unsigned int *)(buf + 20);
+    uid_id = (DMP_UID_ID *)(buf + 24);
+    if (*magic != 0x5555aaaa) goto ERROR;
+    if (24 + 4 + *num * sizeof(DMP_UID_ID) != size) {
+        re = DMP_CFG_FILE_FORMAT_ERR;
+        goto ERROR;
+    }
+    if (memcmp(md5cfg, &dmpSys.cfgmd5, 16) != 0) {
+        re = DMP_CFG_FILE_NOT_MATCH;
+        goto ERROR;
+    }
     for (int i = 0; i < *num; i++) {
         unsigned int index = dmpdevtype2index(uid_id[i].hdtype);
         if (index == 0xffffffff) {
@@ -593,7 +670,18 @@ void dmpSysStore() {
         dev->hdtype = uid_id[i].hdtype;
         dev->stat &= ~DMP_DEV_DEV_ONLINE;
     }
+    free(buf);
+    f_close(&f);
+    return DMP_CFG_FILE_OK;
+    ERROR:
+    if (buf) {
+        free(buf);
+    }
+    f_close(&f);
+    return re;
 }
+
+
 
 
 
@@ -742,7 +830,7 @@ bool dmpUnRegester1(unsigned int devTypeIndex, unsigned int workId) {
         return false;
     }
     if (dev->stat & DMP_DEV_DEV_ONLINE) {
-        if (!dmpCanPreSetId(dev->canChannel, dev->uid, 1, 10)) return false;
+        //if (!dmpCanPreSetId(dev->canChannel, dev->uid, 1, 10)) return false;
         if (!dmpCanSetId(dev->canChannel, dev->uid, 0, 50)) return false;
         list_move_tail(&dev->list, &devtype2devgroup(dev->hdtype)->newadd);
     } else {
@@ -816,7 +904,7 @@ typedef struct {
 
 
 
-bool dmpInit(const TCHAR *path) {
+void dmpInit() {
     //init dmpSys dmpSysSave
     for (int i = 0; i < DEV_TYPE_MAX_NUM; i++) {
         INIT_LIST_HEAD(&dmpSys.dev[i].regester);
@@ -833,53 +921,118 @@ bool dmpInit(const TCHAR *path) {
         devgp_param[i].magic = 0;
         devgp_param[i].devNum = 0;
     }
+}
 
+
+
+
+typedef struct {
+    unsigned int numofDevtype;
+    unsigned int devtypeoffset;
+    unsigned int sizeofDevtype;
+}DEV_INFO;
+
+
+
+static void dmpSysClear() {
+    struct list_head *lp, *ln;
+    DMP_DEV *dev;
+    for (int i = 0; i < DEV_TYPE_MAX_NUM; i++) {
+        list_for_each_safe(lp, ln, &dmpSys.dev[i].regester) {
+            dev = list_entry(lp, DMP_DEV, list);
+            dmpDevDataClear(dev);
+            list_move(lp, &devlistheadfree);
+        }
+        list_for_each_safe(lp, ln, &dmpSys.dev[i].newadd) {
+            dev = list_entry(lp, DMP_DEV, list);
+            dmpDevDataClear(dev);
+            list_move(lp, &devlistheadfree);
+        }
+        list_for_each_safe(lp, ln, &dmpSys.dev[i].unknow) {
+            dev = list_entry(lp, DMP_DEV, list);
+            dmpDevDataClear(dev);
+            list_move(lp, &devlistheadfree);
+        }
+    }
+    list_for_each_safe(lp, ln, &dmpSys.unknow) {
+        dev = list_entry(lp, DMP_DEV, list);
+        dmpDevDataClear(dev);
+        list_move(lp, &devlistheadfree);
+    }
+    list_for_each_safe(lp, ln, &dmpSys.heartbeartreturnlist) {
+        list_del(lp);
+    }
+    list_for_each_safe(lp, ln, &devlisthead) {
+        dev = list_entry(lp, DMP_DEV, list);
+        dmpDevDataClear(dev);
+        list_move(lp, &devlistheadfree);
+    }
+    dmpSys.typeNum = 0;
+    for (int i = 0; i < lenthof(devgp_param); i++) {
+        devgp_param[i].magic = 0;
+        devgp_param[i].devNum = 0;
+    }
+}
+
+bool dmpLoadCfg(const TCHAR *path) {
     FIL file;
     uint32 rb;
     //int nameoffset;
-    MACHI_CFG_FILE_HEAD filehead;
+    MACHI_CFG_FILE_HEAD *filehead;
 
     MD5_CTX md5;
     unsigned char md5hash[16];
     unsigned char *data = NULL, *p;
+    unsigned int filesize;
+    unsigned int dmpSecLen;
+    DEV_INFO *info;
+
+    dmpSysClear();
 
     if (f_open(&file, path, FA_READ) != FR_OK) {
         return false;
     }
-    if (f_read(&file, &filehead, sizeof filehead,&rb) != FR_OK || rb != sizeof filehead) {
+    filesize = f_size(&file);
+    if (filesize > 1024 * 1024) {
+        f_close(&file);
         goto ERROR;
     }
-    if (strcmp(filehead.cfghead, "swjcfg") != 0) goto ERROR;
-
-    if (f_lseek(&file, 0x80) != FR_OK) goto ERROR;
-    data = (unsigned char *)malloc(f_size(&file) - 0x80);
+    data = (unsigned char *)malloc(filesize);
     if (data == NULL) {
+        f_close(&file);
         goto ERROR;
     }
-    unsigned int rd;
-    if (f_read(&file, data, f_size(&file) - 0x80, &rd) != FR_OK || rd != f_size(&file) - 0x80) {
+    if (f_read(&file, data, filesize, &rb) != FR_OK || rb != filesize) {
+        f_close(&file);
         goto ERROR;
     }
+    filehead = (MACHI_CFG_FILE_HEAD *)data;
+    if (strcmp(filehead->cfghead, "swjcfg") != 0) goto ERROR;
+
     MD5Init(&md5);
-    MD5Update(&md5, data, f_size(&file) - 0x80);
+    MD5Update(&md5, data + 24, filesize - 24);
     MD5Final(&md5, md5hash);
-    if (memcmp(&md5hash, &filehead.md5, 16) != 0) goto ERROR;
+    if (memcmp(&md5hash, filehead->md5, 16) != 0) goto ERROR;
 
-    p = data;
+    p = data + filehead->sec[1].offset;
+    dmpSecLen = filehead->sec[1].len;
+    MD5Init(&md5);
+    MD5Update(&md5, p, dmpSecLen);
+    MD5Final(&md5, md5hash);
+    if (memcmp(&md5hash, filehead->sec[1].md5, 16) != 0) goto ERROR;
 
-    MACHI_CFG_HEAD *head;
-    head = (MACHI_CFG_HEAD *)p;
+    memcpy(dmpSys.cfgmd5, md5hash, 16);
 
-    ASSERT(head->numofDevtype <= lenthof(devgp_param));
-    p += head->devtypeoffset - 0x80;
-    ASSERT(p <= data + f_size(&file) - 0x80);
-    if (sizeof(DEV_TYPE_PARAM) != head->sizeofDevtype) goto ERROR;
+    info = (DEV_INFO *)p;
 
+    ASSERT(info->numofDevtype <= lenthof(devgp_param));
+    if (sizeof(DEV_TYPE_PARAM) != info->sizeofDevtype) goto ERROR;
+
+    p += info->devtypeoffset;
     DEV_TYPE_PARAM *dev_type_param;
-    for (int i = 0; i < head->numofDevtype; i++) {
+    for (int i = 0; i < info->numofDevtype; i++) {
         dev_type_param = (DEV_TYPE_PARAM *)p;
-        p += sizeof(DEV_TYPE_PARAM);
-        ASSERT(p <= data + f_size(&file) - 0x80);
+        ASSERT(p <= data + filesize - sizeof dev_type_param);
         if (dev_type_param->magic != 0xaa55) continue;
         unsigned int index = dev_type_param->typeIndex;
         ASSERT(index < DEV_TYPE_MAX_NUM);
@@ -890,26 +1043,28 @@ bool dmpInit(const TCHAR *path) {
         wcsncpy(devgp_param[index].name, dev_type_param->name, sizeof(devgp_param[index].name) / 2 - 1);
         dmpSys.dev[index].param = &devgp_param[index];
         dmpSys.typeNum++;
+        p += sizeof(DEV_TYPE_PARAM);
     }
-
     for (int i = 0; i < dmpSys.typeNum; i++) {
         if (devgp_param[i].magic != 0xaaaa5555) {
             goto ERROR;
         }
     }
-    f_close(&file);
+    dmpSysStore();
+
     if (data != NULL) {
         free(data);
     }
-    dmpSysStore();
     return true;
     ERROR:
-    f_close(&file);
     if (data != NULL) {
         free(data);
     }
     return false;
 }
+
+
+
 
 
 #define HEARTBEAT_RETURN_TIMEOUT   10 //MS

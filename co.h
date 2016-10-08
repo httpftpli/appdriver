@@ -701,6 +701,7 @@ struct __machine_str_tag {
                                uint16 *alarmcode, uint32 *alarmnum);
     void (*funcode2Alarm)(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
     void (*funCamResolve)(FUNC *fun, uint16 *valvecode, uint32 *num);
+    void (*fun0309CamResolve)(FUNC *fun, uint16 *valvecode, uint32 *num);
 };
 
 
