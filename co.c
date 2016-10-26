@@ -18,9 +18,12 @@
 
 #define MOTOR_SCALE   1
 #define MOTOR_ACC_SCALE  100
-#define FILEPATH  L"1:\\"
-//#define BTSR_DIS_BUF_SIZE 512*1024
-#define BTSR_DIS_BUF_CNT  6
+#define YARNSENSER_FILEDIR    L"1:\\"
+
+
+
+
+
 
 
 
@@ -32,7 +35,7 @@ static struct list_head funcfreelist;
 static SPEED __speed[800];
 static struct list_head speedfreelist;
 
-static FENGMEN __fengmen[1000];
+static MPP __fengmen[1000];
 static struct list_head fengmenfreelist;
 
 static S_CO_RUN_STEP __run_step[3000];
@@ -135,18 +138,15 @@ void coInit(char machinename[], uint32 niddleNum, uint32 sel_PreNiddleNum) {
     }
     for (int i = 0; i < lenthof(__btsr_pool); i++) {
         list_add_tail(&__btsr_pool[i].list, &btsr_freelist);
-    }
-    //creat jacq memery pool
+    }    
     static SEL_JAC jacpool[1000];
     static SEL_GUID guidpool[30];
-    //static char btsr_dis_buf[BTSR_DIS_BUF_CNT][BTSR_DIS_BUF_SIZE];
+    
     MEM_ERR memerr;
     MemCreate(&jacmem, "jacq memery pool", jacpool, lenthof(jacpool), sizeof(SEL_JAC), &memerr);
     ASSERT(memerr == MEM_ERR_NONE);
     MemCreate(&guidmem, "guid memery pool", guidpool, lenthof(guidpool), sizeof(SEL_GUID), &memerr);
-    ASSERT(memerr == MEM_ERR_NONE);
-    //MemCreate(&btsr_dis_mem, "btsr dis memery", btsr_dis_buf, BTSR_DIS_BUF_CNT, BTSR_DIS_BUF_SIZE, &memerr);
-    //ASSERT(memerr == MEM_ERR_NONE);
+    ASSERT(memerr == MEM_ERR_NONE);   
     ASSERT(niddleNum % 16 == 0);
     machine.niddleNum = niddleNum;
     machine.feedNum = 4;
@@ -276,7 +276,7 @@ bool readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
             if (cofunc->angular != 0x8000) {
                 ASSERT(cofunc->angular < 360);
                 addr += 6;
-                if ((cofunc->funcode == 0x031f) || (cofunc->funcode == 0x011f)) {
+                if ((cofunc->funcode == 0x031f) || (cofunc->funcode == 0x011f)||(cofunc->funcode == 0x001f)) {
                     addradd = 4;
                 } else if (cofunc->funcode == 0x030b) {
                     addradd = 2;
@@ -306,13 +306,13 @@ bool readFunc(uint8 *funcaddr, struct list_head *funclist, unsigned int *step) {
 }
 
 
-static void readFengmen(uint8 *fengmenbuf, struct list_head *fengmenlist, unsigned int *step) {
+static void readMpp(uint8 *fengmenbuf, struct list_head *fengmenlist, unsigned int *step) {
     *step = *(uint32 *)fengmenbuf / 4;
     for (int i = 0; i < *step; i++) {
-        FENGMEN *fengmen;
+        MPP *fengmen;
         CO_FENGMEN *fengmentemp = (CO_FENGMEN *)(fengmenbuf + *((uint32 *)fengmenbuf + i));
         while (1) {
-            fengmen = list_first_entry_or_null(&fengmenfreelist, FENGMEN, list);
+            fengmen = list_first_entry_or_null(&fengmenfreelist, MPP, list);
             ASSERT(fengmen != NULL);
             if (fengmentemp->angular != 0x8000) {
                 ASSERT(fengmentemp->angular < 360);
@@ -466,7 +466,7 @@ static bool co_read_cate(S_CO *co, uint8 catepartbuf[]) {
 static bool co_read_mpp(S_CO *co, uint8 mpppartbuf[]) {
     CO_MPP_INFO *mppinfo = (CO_MPP_INFO *)mpppartbuf;
     uint32 step;
-    readFengmen(mpppartbuf + mppinfo->fengmen1addr, co->fengmen, &step);
+    readMpp(mpppartbuf + mppinfo->fengmen1addr, co->fengmen, &step);
     if (step != co->numofstep) {
         return false;
     }
@@ -856,12 +856,12 @@ void coRelease(S_CO *co) {
             list_add(p, &funcfreelist);
         }
     }
-    FENGMEN *fengmen;
+    MPP *fengmen;
     for (int i = 0; i < lenthof(co->fengmen); i++) {
         list_for_each_safe(p, n, &co->fengmen[i]) {
-            fengmen = list_entry(p, FENGMEN, list);
+            fengmen = list_entry(p, MPP, list);
             list_del(p);
-            memset(fengmen, 0, sizeof(FENGMEN));
+            memset(fengmen, 0, sizeof(MPP));
             list_add(p, &fengmenfreelist);
         }
     }
@@ -1405,7 +1405,7 @@ static void cocreateindex_guid(S_CO_RUN *co_run, S_CO *co) {
 static void btsrLoadFile(BTSR *btsr, bool *havematchbtsrfile) {
     *havematchbtsrfile = false;
     wchar_t btsrfilepath[200];
-    wcscpy(btsrfilepath, FILEPATH);
+    wcscpy(btsrfilepath, YARNSENSER_FILEDIR);
     wcscat(btsrfilepath, btsr->name);
     fileFixNameReplace(btsrfilepath, L".btr");
     FIL btsrfile;
@@ -1571,7 +1571,7 @@ BOOL coRunBtsrSave(S_CO_RUN *co_run) {
     }
     S_CO *co = co_run->co;
     wchar_t btsrfilepath[200];
-    wcscpy(btsrfilepath, FILEPATH);
+    wcscpy(btsrfilepath, YARNSENSER_FILEDIR);
     wcscat(btsrfilepath, co->filename);
     fileFixNameReplace(btsrfilepath, L".btr");
     FIL btsrfile;
@@ -1943,9 +1943,9 @@ int32 corunReadLine(S_CO_RUN *co_run, S_CO_RUN_LINE *line, const S_CO_RUN_LINE *
         line->isfengmenAct = true;
         memset(line->fengmen, 0, sizeof line->fengmen);
         struct list_head *p;
-        FENGMEN *fengmenp;
+        MPP *fengmenp;
         list_for_each(p, step->fengmen) {
-            fengmenp = list_entry(p, FENGMEN, list);
+            fengmenp = list_entry(p, MPP, list);
             line->fengmen[fengmenp->angular] = fengmenp;
         }
     } else {
@@ -2639,7 +2639,7 @@ static void L10L12_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *v
         if (*valvecode != 0xffff) {
             *valnum = 1;
         } else {
-            //TODO GUIDING
+            *valnum = 0;
         }
     }
 }
@@ -2660,14 +2660,19 @@ static uint16 L04E7_misc0203code2Valvecode(uint16 codevalue) {
 
     int16 inorout;
     int16 ivalve;
-    int16 re = 0xffff;
+    int16 re = 0;
     if (codevalue >= 0xa3 && codevalue <= 0xa8) { //EV107 EV108 EV109
         codevalue--;
     }
     ivalve = codevalue >> 1;
     inorout = !(codevalue % 2) << 12;
-    re = inorout | mis0203funmap[ivalve];
-    return re;
+    if (ivalve<lenthof(mis0203funmap)) {
+        re =  mis0203funmap[ivalve]; 
+    }
+    if (re!=0) {
+        return inorout | re;
+    }
+    return 0xffff;
 }
 
 
@@ -2697,11 +2702,16 @@ static uint16 L500_misc0203code2Valvecode(uint16 codevalue) {
 
     int16 inorout;
     int16 ivalve;
-    int16 re = 0xffff;
+    int16 re = 0;
     ivalve = codevalue >> 1;
     inorout = !(codevalue % 2) << 12;
-    re = inorout | mis0203funmap[ivalve];
-    return re;
+    if (ivalve<lenthof(mis0203funmap)) {
+        re = mis0203funmap[ivalve];
+    }
+    if (re!=0) {
+        return inorout | re;
+    }
+    return 0xffff;
 }
 
 
@@ -2763,8 +2773,12 @@ static void L04E7_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *va
     } else {
         valvecode_t = L04E7_misc0203code2Valvecode(codevalue);
     }
-    *valvecode = valvecode_t;
-    *valnum = 1;
+    if (valvecode_t!=0xffff) {
+        *valvecode = valvecode_t;
+        *valnum = 1;
+    }else{
+        *valnum = 0;
+    }
 }
 
 
@@ -2777,8 +2791,12 @@ static void L500_fun0203Resolve(uint16 codevalue, uint16 *valvecode, uint32 *val
     } else {
         valvecode_t = L500_misc0203code2Valvecode(codevalue);
     }
-    *valvecode = valvecode_t;
-    *valnum = 1;
+    if (valvecode_t!=0xffff) {
+        *valvecode = valvecode_t;
+        *valnum = 1;
+    }else{
+        *valnum = 0;
+    }
 }
 
 
@@ -2958,10 +2976,24 @@ static void funcodeResolve(FUNC *fun, uint16 *valvecode, uint32 *valnum,
 
 
 
-
 /************************for co debug **************************/
+#ifdef CO_DEBUG
+
+#include "bmp.h"
 #include "qifa.h"
+
 static FIL acttestfile;
+
+typedef struct{
+    const char name[30];
+}ACT_NAME;
+
+
+ACT_NAME actNames[]= {  
+  #define ACT(A)  [A] = #A,
+  #include "qifacode.h"
+};
+
 bool coActTestBegin(const TCHAR *filepath, S_CO_RUN *run) {
     if (f_open(&acttestfile, filepath, FA_WRITE | FA_CREATE_ALWAYS) == FR_OK) {
         char filename[30], buf[100];
@@ -3008,7 +3040,13 @@ void coActTest(S_CO_RUN_LINE *line) {
         for (int j = 0; j < line->act[i].num; j++) {
             actcode2Act(line->act[i].valvecode[j], &act);
             const char *inoutchar = act.inout ? "(i)" : "(o)";
-            sprintf(buf, "\t%s%s %04x ", act.nickname, inoutchar, act.valveCode);
+            const char * actname;
+            if(actNames[act.valveCode].name[0]!=NULL) {
+                actname = actNames[act.valveCode].name;
+            }else{
+                actname = "NULL";
+            }
+            sprintf(buf, "\t%s[%s]%s 0x%04x ", actname, act.nickname, inoutchar, act.valveCode);
             f_write(&acttestfile, buf, strlen(buf), &wr);
         }
         for (int j = 0; j < line->alarm[i].num; j++) {
@@ -3103,7 +3141,6 @@ static unsigned int camEv2Feed(unsigned short ev) {
 }
 
 
-#include "bmp.h"
 
 
 void coTest(TCHAR *path, unsigned int flag) {
@@ -3255,6 +3292,8 @@ void coTest(TCHAR *path, unsigned int flag) {
         }
     }
 }
+
+#endif
 
 
 

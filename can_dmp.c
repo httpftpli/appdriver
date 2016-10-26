@@ -1210,6 +1210,47 @@ void dmpIapHelper(DMP_IAP_HELPER *helper, uint32 num) {
 }
 
 
+void dmpIapHelper2(DMP_IAP_HELPER *helper, uint32 num) {
+    struct list_head *p,*n;
+    DMP_DEV * dev,*helpdev;
+    list_for_each_safe(p, n, &devlisthead) {
+        dev = list_entry(p, DMP_DEV, list);
+        dmpDevDataClear(dev);
+        list_move(p, &devlistheadfree);
+    }
+
+#ifdef DMP_USE_CAN0
+    dmpCanRdDevVer(MODULE_ID_DCAN0, 0xffffffff);
+#endif
+#ifdef DMP_USE_CAN1
+    dmpCanRdDevVer(MODULE_ID_DCAN1, 0xffffffff);
+#endif
+    delay(100);
+    uint32 typeindex;
+    for (int i = 0; i < num; i++) {
+        helper[i].num = 0;
+    }
+    list_for_each(p, &devlisthead) {
+        dev = list_entry(p, DMP_DEV, list);
+        typeindex = dmpdevtype2index(dev->hdtype);
+        if ((typeindex != 0xffffffff) && (typeindex < num)) {
+            helpdev = &helper[typeindex].devs[helper[typeindex].num++];
+            memcpy(helpdev, dev, sizeof*dev);
+        }
+    }
+    list_for_each_safe(p, n, &devlisthead) {
+        dev = list_entry(p, DMP_DEV, list);
+        dmpDevDataClear(dev);
+        list_move(p, &devlistheadfree);
+    }
+    for (int i = 0; i < num; i++) {
+        for (int j = 0; j < helper[i].num; j++) {
+            dmpCanReadId(helper[i].devs[j].canChannel, helper[i].devs[j].uid, &helper[i].devs[j].workid, 10);
+        }
+    }
+}
+
+
 void dmpCanRdDevVer(unsigned int can, unsigned int uid) {
     DEFINE_CAN_DMP_FRAME(frame);
     frame.uid = uid;

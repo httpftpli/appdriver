@@ -294,7 +294,7 @@ typedef struct {
     uint16 funcode;
     uint16 val;
     struct list_head list;
-}FENGMEN;
+}MPP;
 
 
 
@@ -640,21 +640,21 @@ typedef struct {
 
 
     uint16 prerpm;
-    int32 rpm;                    //当前圈设定速度
+    int32 rpm;                      //当前圈设定速度
     int16 speedAcc;
     uint16 targetSpeed;             //target speed when ramp
 
     bool welt;                      //flag is_or_not in welt;
 
-    uint16 iecono;                   //当前循环
+    uint16 iecono;                  //当前循环
     uint16 econobegin;              //当前循环首,如果没有循环为0
     uint16 econoend;                //当前循环尾,如果没有循环为0
-    uint16 econonum;                 //当前循环总共循环
+    uint16 econonum;                //当前循环总共循环
 
     bool isfengmenAct;
     ACT_GROUP act[360];
     ALARM_GROUP alarm[360];
-    FENGMEN *fengmen[360];
+    MPP *fengmen[360];
 
     char *zonename;
     uint16 zonebegin;
@@ -702,6 +702,8 @@ struct __machine_str_tag {
     void (*funcode2Alarm)(FUNC *func, uint16 *alarmcode, uint32 *alarmnum);
     void (*funCamResolve)(FUNC *fun, uint16 *valvecode, uint32 *num);
     void (*fun0309CamResolve)(FUNC *fun, uint16 *valvecode, uint32 *num);
+    // SONTONI Knitting Machine
+    void (*fun02000220Resolve)(FUNC *fun, uint16 *valvecode, uint32 *num); //spec func and yarn finger 
 };
 
 

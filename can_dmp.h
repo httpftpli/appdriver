@@ -69,6 +69,7 @@ struct slave_dev {
     unsigned int uid;       //Î¨Ò» id
     unsigned short workid;  //¹¤×÷id
     unsigned char canChannel;
+    unsigned char romAddr;  
     unsigned int timespan;
     unsigned long long __timespan_;
     bool (*heartBeat)(DMP_DEV *dev);
